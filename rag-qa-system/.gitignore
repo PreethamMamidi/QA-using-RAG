@@ -1,0 +1,75 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE / Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# Environment variables
+.env
+.env.local
+
+# Data directories (uncomment if you want to exclude data)
+data/raw_docs/*
+!data/raw_docs/.gitkeep
+data/processed_chunks/*
+!data/processed_chunks/.gitkeep
+
+# Model caches and downloads
+.cache/
+models/
+*.bin
+*.safetensors
+*.gguf
+
+# HuggingFace cache
+transformers_cache/
+sentence_transformers/
+
+# FAISS indices
+*.index
+*.faiss
+
+# Logs
+*.log
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Streamlit
+.streamlit/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp

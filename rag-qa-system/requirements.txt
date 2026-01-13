@@ -1,0 +1,24 @@
+# Core
+sentence-transformers
+faiss-cpu
+# Core
+torch
+transformers
+sentence-transformers
+faiss-cpu
+numpy
+scikit-learn
+
+# Ingestion
+pymupdf
+nltk
+pypdf
+
+# App
+streamlit
+
+# Utilities
+tqdm
+python-dotenv
+pandas
+openai
