@@ -124,7 +124,7 @@ def embed_texts(texts: List[str], batch_size: int = 32) -> np.ndarray:
 	texts : List[str]
 		Input text strings to embed.
 	batch_size : int, optional
-		Batch size for model encoding, by default 32.
+		Batch size for model encoding,  default 32.
 
 	Returns
 	-------
