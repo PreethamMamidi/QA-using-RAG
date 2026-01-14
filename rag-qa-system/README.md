@@ -86,8 +86,44 @@ You can use these metrics to benchmark different configurations, chunk sizes, or
 
 The system follows a modular RAG pipeline:
 
+```
+Documents (PDF/TXT)
+    ↓
+Ingestion (Load & Clean)
+    ↓
+Chunks (Text Segments)
+    ↓
+Embedding (Sentence Transformers)
+    ↓
+Vectors (Dense Representations)
+    ↓
+Indexing (FAISS Vector Store)
+    ↓
+FAISS Index (Stored on Disk)
+```
+
+**Query Processing:**
+```
+User Query
+    ↓
+Retrieval (Similarity Search)
+    ↓
+Relevant Chunks (Top-K Matches)
+    ↓
+Generation (FLAN-T5 Model)
+    ↓
+Answer (Context-Aware Response)
+```
+
+### Pipeline Components
+
 1. **Ingestion**: Load and clean documents, then chunk them into manageable pieces
-2. **Embedding**: Convert text chunks to dense vector representations
+2. **Embedding**: Convert text chunks to dense vector representations using Sentence Transformers
+3. **Indexing**: Build a FAISS index for efficient similarity search
+4. **Retrieval**: Find the most relevant chunks for a given query using vector similarity
+5. **Generation**: Use retrieved context to generate accurate answers with FLAN-T5
+
+### Pipeline Components
 3. **Indexing**: Build a FAISS vector index for efficient similarity search
 4. **Retrieval**: Find the most relevant chunks for a given query
 5. **Generation**: Use retrieved context to generate accurate answers

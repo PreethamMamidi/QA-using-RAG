@@ -131,7 +131,7 @@ if st.session_state.index is not None:
             query,
             st.session_state.index,
             st.session_state.chunks,
-            top_k=3,
+            top_k=8,
         )
 
         answer = generate_answer(query, retrieved)

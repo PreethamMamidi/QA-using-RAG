@@ -37,7 +37,7 @@ def _load_pdf_pages(path: Path) -> List[Dict[str, str]]:
 		for i in range(doc.page_count):
 			page = doc.load_page(i)
 			text = (page.get_text("text") or "").strip()
-			if not text:
+			if not text or len(text) < 50:
 				continue
 			entries.append({
 				"document_id": f"{path.name}_page_{i+1}",
