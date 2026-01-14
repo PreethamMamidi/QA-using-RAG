@@ -1,0 +1,147 @@
+[
+  {
+    "chunk_id": "Lec 19.pdf_page_1_0",
+    "document_id": "Lec 19.pdf_page_1",
+    "text": "Course: Computer Networks (CSL 302, Core) 5th Semester Topics Covered TCP Timers Timeout Timer Basic Algo Jacobsons Algo Karns modification Silly Window Syndrome"
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_2_0",
+    "document_id": "Lec 19.pdf_page_2",
+    "text": "TCP Timers TCP Timers Time-Wait Timer Keep-Alive Timer Persistent Timer Acknowledgement Timer Timeout Timer"
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_3_0",
+    "document_id": "Lec 19.pdf_page_3",
+    "text": "Cont Time Wait Timer TCP uses a time wait timer during connection termination Sender starts the time wait timer after sending the ACK for the second FIN segment. Allows to resend the final acknowledgement if it gets lost. Prevents the just closed port from reopening again quickly to some other application Ensures that all the segments heading towards the just closed port are discarded The value of time wait timer is usually set to twice the lifetime of a TCP segment"
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_4_0",
+    "document_id": "Lec 19.pdf_page_4",
+    "text": "Cont Keep Alive Timer TCP uses a keep alive timer to prevent long idle TCP connections Each time server hears from the client, it resets the keep alive timer to 2 hours If server does not hear from the client for 2 hours, it sends 10 probe segments to the client These probe segments are sent at a gap of 75 seconds If server receives no response after sending 10 probe segments, it assumes that the client is down Then, server terminates the connection automatically"
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_5_0",
+    "document_id": "Lec 19.pdf_page_5",
+    "text": "Cont Persistent Timer TCP uses a persistent timer to deal with a zero-widow-size deadlock situation It keeps the window size information flowing even if the other end closes its receiver window Consider the following situation- Sender receives an acknowledgment from the receiver with zero window size This indicates the sender to wait Later, receiver updates the window size and and sends the segment with the update to the sender This segment gets lost Now, both sender and receiver keeps waiting for each other to do something To deal with such a situation, TCP uses a persistent timer"
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_6_0",
+    "document_id": "Lec 19.pdf_page_6",
+    "text": "Cont Sender starts the persistent timer on receiving an ACK from the receiver with a zero window size. When persistent timer goes off, sender sends a special segment to the receiver. This special segment is called as probe segment and contains only 1 byte of new data. Response sent by the receiver to the probe segment gives the updated window size. If the updated window size is non-zero, it means data can be sent now. If the updated window size is still zero, the persistent timer is set again and the cycle repeats."
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_7_0",
+    "document_id": "Lec 19.pdf_page_7",
+    "text": "Cont Time Out Timer TCP uses a time out timer for retransmission of lost segments. Sender starts a time out timer after transmitting a TCP segment to the receiver. If sender receives an acknowledgement before the timer goes off, it stops the timer. If sender does not receives any acknowledgement and the timer goes off, then TCP Retransmission occurs. Sender retransmits the same segment and resets the timer. The value of time out timer is dynamic and changes with the amount of traffic in the network. Time out timer is also called as Retransmission Timer."
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_8_0",
+    "document_id": "Lec 19.pdf_page_8",
+    "text": "Network Traffic And Time Out Timer Consider Receiver has sent the ACK to the sender. The ACK is on its way through the network. Following two cases are possible: Case-01: High traffic If there is high traffic in the network The time taken by the ACK to reach the sender will be more. So, as per the high traffic, the value of time out timer should be kept large. If the value is kept small, then Timer will time out soon. It causes the sender to assume that the segment is lost before reaching the receiver."
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_9_0",
+    "document_id": "Lec 19.pdf_page_9",
+    "text": "Cont However, in actual the ACK is delayed due to high traffic. Sender keeps retransmitting the same segment. This overburdens the network and might lead to congestion. Case-02: Low traffic If there is low traffic in the network- The time taken by the ACK to reach the sender will be less. So, as per the low traffic, the value of time out timer should be kept small. If the value is kept large, Timer will not time out soon. Sender keeps waiting for the ACK even when it is actually lost. This causes excessive delay."
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_10_0",
+    "document_id": "Lec 19.pdf_page_10",
+    "text": "Cont Therefore, the value of time out timer should be such that It decreases when there is low traffic in the network. It increases when there is high traffic in the network."
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_11_0",
+    "document_id": "Lec 19.pdf_page_11",
+    "text": "Algorithms For Time Out Timer Algorithms used for dynamically computing time out timer: Basic Algorithm Jacobsons Algorithm Karns modification All the above algorithms work on the following rules Rule-01: The value of time out timer for the next segment is increased when Actual round trip time for the previous segment is found to be increased indicating there is high traffic in the network. Rule-02: The value of time out timer for the next segment is decreased when Actual round trip time for the previous segment is found to be decreased indicating there is low traffic in the network"
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_12_0",
+    "document_id": "Lec 19.pdf_page_12",
+    "text": "Basic Algorithm Step-01: Sending 1st Segment While sending the 1st segment, Sender assumes any random value of initial RTT say IRTT1. So after sending the 1st segment, sender expects its ACK to arrive in time IRTT1. Sender sets time out timer value (TOT) for the 1st segment to be- TOT1 = 2 X IRTT1 Suppose ACK for the 1st segment arrives in time ARTT1. Here, ARTT1 = Actual Round Trip Time for the 1st segment."
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_13_0",
+    "document_id": "Lec 19.pdf_page_13",
+    "text": "Cont Step-02: Sending 2nd Segment While sending the 2nd segment, Sender computes the value of initial RTT for the 2nd segment using the relation- IRTTn+1 = IRTTn + (1 )ARTTn Here, is called smoothing factor where 0 <= <= 1 Now, Substituting n=1, sender gets IRTT2 = IRTT1 + (1 )ARTT1 So after sending the 2nd segment, sender expects its ACK to arrive in time IRTT2. Sender sets time out timer value (TOT) for the 2nd segment to be- TOT2 = 2 X IRTT2"
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_14_0",
+    "document_id": "Lec 19.pdf_page_14",
+    "text": "Cont Suppose ACK for the 2nd segment arrives in time ARTT2. Here, ARTT2 = Actual Round Trip Time for the 2nd segment. In the similar manner, algorithm computes the time out timer value for all the further segments. Advantages Time out timer value is flexible to dynamic round trip time. It takes into consideration all the previously sent segments to derive the initial RTT for the current segment. Disadvantage It always considers Time out timer value = 2 x Initial round trip time. There is no logic behind using the number 2."
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_15_0",
+    "document_id": "Lec 19.pdf_page_15",
+    "text": "Cont Basic Algorithm Example IRTT = 10 ms TO = 2 * RTT = 20 ms ARTT = 15 ms NRTT = * IRTT + (1-) * ARTT where is smoothening factor = 12.5 ms when = 0.5 IRTT = 12.5 ms TO = 2 * IRTT = 25 ms ARTT = 20 ms NRTT = * IRTT + (1-) * ARTT = 16.25 ms IRTT = 16.25 ms TO = 2 * IRTT = 32.5 ms ARTT = 10 ms NRTT = * IRTT + (1-) * ARTT = 13.125 ms IRTT = 13.125 ms TO = 2 * IRTT = 26.25 ms"
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_16_0",
+    "document_id": "Lec 19.pdf_page_16",
+    "text": "Jacobsons Algorithm Jacobsons Algorithm is a modified version of the basic algorithm. It gives better performance than Basic Algorithm. Step-01: Sending 1st Segment While sending the 1st segment, Sender assumes any random value of initial RTT say IRTT1. So after sending the 1st segment, sender expects its ACK to arrive in time IRTT1. Sender assumes any random value of initial deviation say ID1. So after sending the 1st segment, sender expects there will be a deviation of ID1 time from IRTT1. Sender sets time out timer value (TOT) for the 1st segment to be-"
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_17_0",
+    "document_id": "Lec 19.pdf_page_17",
+    "text": "Cont TOT1 = 4 x ID1 + IRTT1 Suppose ACK for the 1st segment arrives in time ARTT1. Here, ARTT1 = Actual Round Trip Time for the 1st segment. Then, Actual deviation from IRTT1 is given by- AD1 = | IRTT1 ARTT1 | Step-02: Sending 2nd Segment- While sending the 2nd segment, Sender computes the value of initial RTT for the 2nd segment using the relation- IRTTn+1 = IRTTn + (1 )ARTTn Here, is called smoothing factor where 0 <= <= 1"
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_18_0",
+    "document_id": "Lec 19.pdf_page_18",
+    "text": "Cont Sender computes the value of initial deviation for the 2nd segment using the relation- IDn+1 = IDn + (1 )ADn Here, is called smoothing factor where 0 <= <= 1 Substituting n=1, sender gets- IRTT2 = IRTT1 + (1 )ARTT1 ID2 = ID1 + (1 )AD1 So after sending the 2nd segment, sender expects its ACK to arrive in time IRTT2 with deviation of ID2 time. Sender sets time out timer value (TOT) for the 2nd segment to be-"
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_19_0",
+    "document_id": "Lec 19.pdf_page_19",
+    "text": "Cont TOT2 = 4 x ID2 + IRTT2 Suppose ACK for the 2nd segment arrives in time ARTT2. Here, ARTT2 = Actual Round Trip Time for the 2nd segment. Then, Actual deviation from IRTT2 is given by- AD2 = |IRTT2 ARTT2| In the similar manner, algorithm computes the time out timer value for all the further segments."
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_20_0",
+    "document_id": "Lec 19.pdf_page_20",
+    "text": "Cont IRTT = 10 ms ID = 5 ms TO = 4 * D + RTT = 4 * 5 + 10 = 30 ms ARTT = 20 ms AD = IRTT - ARTT = 10 ms -------------------------------- NRTT = *(IRTT) + (1-)*ARTT = 15 ms (when = 0.5) ND = *(ID) + (1-)*AD = 7.5 ms IRTT = 15 ms ID = 7.5 ms TO = 4 * D + RTT = 4 * 7.5 + 15 = 45 ms ARTT = 30 ms AD = IRTT - ARTT = 15 ms -------------------------------- NRTT = *(IRTT) + (1-)*ARTT = 22.5 ms (when = 0.5) ND = *(ID) + (1-)*AD = 11.25 ms IRTT = 22.5 ms ID = 11.25 ms TO = 4 * D + RTT = 4 * 11.25 + 22.5 = 67.5 ms ARTT = 10 ms AD = IRTT - ARTT = 12.5 ms -------------------------------- NRTT = *(IRTT) + (1-)*ARTT = 16.25 ms ( = 0.5) ND = *(ID) + (1-)*AD = 11.875 ms TO = 4 * D + RTT = 4 * 11.875 + 16.25 = 63.75 ms Jacobsons Algorithm Example"
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_21_0",
+    "document_id": "Lec 19.pdf_page_21",
+    "text": "Cont Problems with Basic Algorithm and Jacobsons Algorithm To calculate initial round trip time, both the algorithms depend on the actual round trip time of the previous segment through the relation- IRTTn+1 = IRTTn + (1 )ARTTn Now, Consider ACK of some segment arrives to the sender after its initial time out timer goes off. Then, sender will have to re-transmit the segment. Now for the segment being re transmitted, what should be the initial time out timer value is the concern. This is because the ACK is delayed and will arrive after time out. So, ARTT is not available. This problem is resolved by Karns modification."
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_22_0",
+    "document_id": "Lec 19.pdf_page_22",
+    "text": "Karns Modification Karns modification Whenever a segment has to be re-transmitted, do not apply either of Basic or Jacobsons algorithm since actual RTT is not available. Instead, double the time out timer (TOT) whenever the timer times out and make a retransmission."
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_23_0",
+    "document_id": "Lec 19.pdf_page_23",
+    "text": "Silly Window Syndrome Silly Window Syndrome Silly Window Syndrome is a problem that arises due to the poor implementation of TCP Degrades the TCP performance and makes the data transmission extremely inefficient The problem is called so because Causes the sender window size to shrink to a silly value The window size shrinks to such an extent where the data being transmitted is smaller than TCP Header"
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_24_0",
+    "document_id": "Lec 19.pdf_page_24",
+    "text": "Cont The problem arises due to following causes-"
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_25_0",
+    "document_id": "Lec 19.pdf_page_25",
+    "text": "Cont Cause-01: Sender Transmitting Data In Small Segments Repeatedly Consider application generates one byte of data to send at a time The poor implementation of TCP causes the sender to send each byte of data in an individual TCP segment This problem is solved using Nagles Algorithm"
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_26_0",
+    "document_id": "Lec 19.pdf_page_26",
+    "text": "Cont Nagles Algorithm tries to solve the problem caused by the sender delivering 1 data byte at a time Nagles algorithm suggests Sender should send only the first byte on receiving one byte data from the application Sender should buffer all the rest bytes until the outstanding byte gets acknowledged In other words, sender should wait for 1 RTT After receiving the acknowledgement, sender should send the buffered data in one TCP segment Then, sender should buffer the data again until the previously sent data gets acknowledged"
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_27_0",
+    "document_id": "Lec 19.pdf_page_27",
+    "text": "Cont Cause-02: Receiver Accepting Only Few Bytes Repeatedly Consider the receiver continues to be unable to process all the incoming data In such a case, its window size becomes smaller and smaller A stage arrives when it repeatedly sends the window size of 1 byte to the sender This problem is solved using Clarks Solution"
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_28_0",
+    "document_id": "Lec 19.pdf_page_28",
+    "text": "Cont Clarks Solution tries to solve the problem caused by the receiver consuming one data byte at a time Clarks solution suggests Receiver should not send a window update for 1 byte Receiver should wait until it has a decent amount of space available (i.e. buffer or 1 MSS) Receiver should then advertise that window size to the sender Specifically, the receiver should not send a window update. Until, it can handle the MSS it advertised during Three Way Handshake"
+  },
+  {
+    "chunk_id": "Lec 19.pdf_page_29_0",
+    "document_id": "Lec 19.pdf_page_29",
+    "text": "Cont Important Notes Nagles algorithm is turned off for the applications that require data to be sent immediately As, Nagles algorithm sends only one segment per round trip time. This impacts the latency by introducing a delay Nagles algorithm and Clarks solution are complementary Both Nagles solution and Clarks solution can work together The ultimate goal is sender should not send the small segments and receiver should not ask for them"
+  }
+]

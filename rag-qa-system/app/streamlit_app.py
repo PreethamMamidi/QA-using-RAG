@@ -1,3 +1,4 @@
+import json
 import streamlit as st
 import sys
 import os
@@ -78,6 +79,19 @@ if process and uploaded_files:
 
         st.session_state.chunks = all_chunks
         st.session_state.index = index
+        # ✅ Save index + chunks to disk
+        os.makedirs("storage", exist_ok=True)
+
+# Save FAISS index
+        import faiss
+        faiss.write_index(index, "storage/faiss.index")
+
+# Save chunks metadata
+        with open("storage/chunks.json", "w", encoding="utf-8") as f:
+            json.dump(all_chunks, f, ensure_ascii=False, indent=2)
+
+        st.sidebar.success("Saved index to storage/ ✅")
+
         st.session_state.stats = {
             "files_uploaded": len(uploaded_files),
             "docs_loaded": len(docs),        # pdf pages count here
