@@ -44,6 +44,19 @@ if "chunks" not in st.session_state:
 if "index" not in st.session_state:
     st.session_state.index = None
 
+if (
+    st.session_state.index is None
+    and os.path.exists("storage/faiss.index")
+    and os.path.exists("storage/chunks.json")
+):
+    import faiss
+    with open("storage/chunks.json", "r", encoding="utf-8") as f:
+        st.session_state.chunks = json.load(f)
+
+    st.session_state.index = faiss.read_index("storage/faiss.index")
+
+    st.sidebar.success("Loaded saved index ✅")
+
 if reset:
     st.session_state.chunks = None
     st.session_state.index = None

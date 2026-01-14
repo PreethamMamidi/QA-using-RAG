@@ -1,5 +1,105 @@
 [
   {
+    "chunk_id": "Lec 18.pdf_page_1_0",
+    "document_id": "Lec 18.pdf_page_1",
+    "text": "Course: Computer Networks (CSL 302, Core) 5th Semester Topics Covered Transport Layer Protocols TCP Retransmissions TCP Congestion Control"
+  },
+  {
+    "chunk_id": "Lec 18.pdf_page_2_0",
+    "document_id": "Lec 18.pdf_page_2",
+    "text": "TCP Retransmission TCP Retransmission After establishing the connection, Sender starts transmitting TCP segments to the receiver A TCP segment sent by the sender may get lost on the way before reaching the receiver This causes the receiver to send the acknowledgement with same ACK number to the sender As a result, sender retransmits the same segment to the receiver This is called as TCP retransmission"
+  },
+  {
+    "chunk_id": "Lec 18.pdf_page_3_0",
+    "document_id": "Lec 18.pdf_page_3",
+    "text": "Cont When TCP Retransmission Occurs? When sender discovers that the segment sent by it is lost, it retransmits the same segment to the receiver. Sender discovers that the TCP segment is lost when Either Time Out Timer expires Or it receives three duplicate acknowledgements Corrupted packet"
+  },
+  {
+    "chunk_id": "Lec 18.pdf_page_4_0",
+    "document_id": "Lec 18.pdf_page_4",
+    "text": "Cont Retransmission After Time Out Timer Expiry Each time sender transmits a TCP segment to the receiver, it starts a Time Out Timer Case-01: Sender receives an acknowledgement for the sent segment before the timer goes off. In this case, sender stops the timer. Case-02: Sender does not receives any acknowledgement for the sent segment and the timer goes off. In this case, sender assumes that the sent segment is lost. Sender retransmits the same segment to the receiver and resets the timer"
+  },
+  {
+    "chunk_id": "Lec 18.pdf_page_5_0",
+    "document_id": "Lec 18.pdf_page_5",
+    "text": "Cont"
+  },
+  {
+    "chunk_id": "Lec 18.pdf_page_6_0",
+    "document_id": "Lec 18.pdf_page_6",
+    "text": "Cont Retransmission After Receiving 3 Duplicate Acknowledgements Consider sender receives three duplicate acknowledgements for a TCP segment sent by it Then, sender assumes that the corresponding segment is lost So, sender retransmits the same segment without waiting for its time out timer to expire Also known as Early retransmission or Fast retransmission"
+  },
+  {
+    "chunk_id": "Lec 18.pdf_page_7_0",
+    "document_id": "Lec 18.pdf_page_7",
+    "text": "Cont Example Consider Sender sends 5 TCP segments to the receiver. The second TCP segment gets lost before reaching the receiver. Sender receives 3 duplicate acknowledgements for segment-2 in total. So, sender assumes that the segment-2 is lost. So, it retransmits segment-2 without waiting for its timer to go off."
+  },
+  {
+    "chunk_id": "Lec 18.pdf_page_8_0",
+    "document_id": "Lec 18.pdf_page_8",
+    "text": "Cont After receiving the retransmitted segment-2, Receiver does not send the acknowledgement asking for segment-3 or 4 or 5 Receiver sends the acknowledgement asking for segment-6 directly from the sender This is because previous segments have been already received and acknowledgements for them have been already sent (although wasted in asking for segment-2)"
+  },
+  {
+    "chunk_id": "Lec 18.pdf_page_9_0",
+    "document_id": "Lec 18.pdf_page_9",
+    "text": "Cont Important Notes Consider time out timer expires before receiving the acknowledgement for a TCP segment This case suggests the stronger possibility of congestion in the network. Consider sender receives 3 duplicate acknowledgements for the same TCP segment This case suggests the weaker possibility of congestion in the network. Consider receiver does not receives 3 duplicate acknowledgements for the lost TCP segment In such a case, retransmission occurs only after time out timer goes off. Retransmission on receiving 3 duplicate acknowledgements is a way to improve the performance over retransmission on time out"
+  },
+  {
+    "chunk_id": "Lec 18.pdf_page_10_0",
+    "document_id": "Lec 18.pdf_page_10",
+    "text": "TCP Congestion Control Congestion in Network Congestion refers to a network state where The message traffic becomes so heavy that it slows down the network response time. Congestion is an important issue that can arise in Packet Switched Network Congestion leads to the loss of packets in transit So, it is necessary to control the congestion in network It is not possible to completely avoid the congestion"
+  },
+  {
+    "chunk_id": "Lec 18.pdf_page_11_0",
+    "document_id": "Lec 18.pdf_page_11",
+    "text": "Cont Congestion Control Refers to techniques and mechanisms that can Either prevent congestion before it happens Or remove congestion after it has happened TCP Congestion Control TCP reacts to congestion by reducing the sender window size The size of the sender window is determined by the following two factors Receiver window size Congestion window size Sender window size = Minimum (Receiver window size, Congestion window size)"
+  },
+  {
+    "chunk_id": "Lec 18.pdf_page_12_0",
+    "document_id": "Lec 18.pdf_page_12",
+    "text": "Cont Receiver Window Size Receiver window size is an advertisement of- How much data (in bytes) the receiver can receive without acknowledgement? Sender should not send data greater than receiver window size Otherwise, it leads to dropping the TCP segments which causes TCP Retransmission So, sender should always send data less than or equal to receiver window size Receiver dictates its window size to the sender through TCP Header"
+  },
+  {
+    "chunk_id": "Lec 18.pdf_page_13_0",
+    "document_id": "Lec 18.pdf_page_13",
+    "text": "Cont Congestion Window Sender should not send data greater than congestion window size Otherwise, it leads to dropping the TCP segments which causes TCP Retransmission So, sender should always send data less than or equal to congestion window size Different variants of TCP use different approaches to calculate the size of congestion window Congestion window is known only to the sender and is not sent over the links"
+  },
+  {
+    "chunk_id": "Lec 18.pdf_page_14_0",
+    "document_id": "Lec 18.pdf_page_14",
+    "text": "TCP Congestion Policy TCPs general policy for handling congestion consists of following three phases"
+  },
+  {
+    "chunk_id": "Lec 18.pdf_page_15_0",
+    "document_id": "Lec 18.pdf_page_15",
+    "text": "Cont Slow Start Phase Initially, sender sets congestion window size = Maximum Segment Size (1 MSS) After receiving each acknowledgment, sender increases the congestion window size by 1 MSS In this phase, the size of congestion window increases exponentially Congestion window size = Congestion window size + Maximum segment size After 1 round trip time, congestion window size = (2)1 = 2 MSS"
+  },
+  {
+    "chunk_id": "Lec 18.pdf_page_16_0",
+    "document_id": "Lec 18.pdf_page_16",
+    "text": "Cont After 2 round trip time, congestion window size = (2)2 = 4 MSS After 3 round trip time, congestion window size = (2)3 = 8 MSS and so on. This phase continues until the congestion window size reaches the slow start threshold. Threshold = Maximum number of TCP segments that receiver window can accommodate / 2 = (Receiver window size / Maximum Segment Size) / 2"
+  },
+  {
+    "chunk_id": "Lec 18.pdf_page_17_0",
+    "document_id": "Lec 18.pdf_page_17",
+    "text": "Cont 2. Congestion Avoidance Phase After reaching the threshold, Sender increases the congestion window size linearly to avoid the congestion. On receiving each acknowledgement, sender increments the congestion window size by 1. The followed formula is- Congestion window size = Congestion window size + 1 This phase continues until the congestion window size becomes equal to the receiver window size."
+  },
+  {
+    "chunk_id": "Lec 18.pdf_page_18_0",
+    "document_id": "Lec 18.pdf_page_18",
+    "text": "Cont"
+  },
+  {
+    "chunk_id": "Lec 18.pdf_page_19_0",
+    "document_id": "Lec 18.pdf_page_19",
+    "text": "Cont Congestion Detection Phase When sender detects loss of segments, it reacts in two different ways Case-01: Time Out Timer expires before receiving the acknowledgement for a segment This case suggests the stronger possibility of congestion in the network Chances that a segment has been dropped in the network In this case, sender reacts by Setting the slow start threshold to half of the current congestion window size Decreasing the congestion window size to 1 MSS Resuming the slow start phase"
+  },
+  {
+    "chunk_id": "Lec 18.pdf_page_20_0",
+    "document_id": "Lec 18.pdf_page_20",
+    "text": "Cont Case-02: Detection On Receiving 3 Duplicate Acknowledgements Sender receives 3 duplicate acknowledgements for a segment Suggests weaker possibility of congestion in the network. Chances that a segment has been dropped but few segments sent later may have reached. In this case, sender reacts by Setting the slow start threshold to half of the current congestion window size Decreasing the congestion window size to slow start threshold Resuming the congestion avoidance phase"
+  },
+  {
     "chunk_id": "Lec 19.pdf_page_1_0",
     "document_id": "Lec 19.pdf_page_1",
     "text": "Course: Computer Networks (CSL 302, Core) 5th Semester Topics Covered TCP Timers Timeout Timer Basic Algo Jacobsons Algo Karns modification Silly Window Syndrome"
