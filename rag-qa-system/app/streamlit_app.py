@@ -58,9 +58,18 @@ if (
     st.sidebar.success("Loaded saved index ✅")
 
 if reset:
+    # Clear in-memory state
     st.session_state.chunks = None
     st.session_state.index = None
-    st.success("System reset! Upload documents again and click Process.")
+    st.session_state.stats = None
+
+    # Delete saved files (if they exist)
+    if os.path.exists("storage/faiss.index"):
+        os.remove("storage/faiss.index")
+    if os.path.exists("storage/chunks.json"):
+        os.remove("storage/chunks.json")
+
+    st.sidebar.success("System reset! Saved index deleted ✅")
     st.stop()
 
 # ---------------- Process Uploaded Files ----------------
