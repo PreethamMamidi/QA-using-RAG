@@ -1,6 +1,7 @@
 # Core
 sentence-transformers
 faiss-cpu
+rank-bm25
 # Core
 torch
 transformers
