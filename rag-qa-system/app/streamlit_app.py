@@ -4,6 +4,15 @@ import sys
 import os
 import tempfile
 
+# Optional .env loading
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(override=True)
+    DOTENV_LOADED = True
+except ImportError:
+    DOTENV_LOADED = False
+
 # --- Make project imports work ---
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
@@ -16,7 +25,9 @@ from embeddings.embedder import embed_texts
 from vector_store.faiss_index import build_index
 from retrieval.retriever import retrieve_chunks
 from retrieval.reranker import rerank_chunks
+from retrieval.query_rewrite import rewrite_query_groq
 from generation.generator import generate_answer
+from generation.groq_generator import generate_answer_groq
 
 
 st.set_page_config(page_title="RAG QA System", layout="wide")
@@ -33,8 +44,43 @@ process = st.sidebar.button("✅ Process documents")
 reset = st.sidebar.button("🔄 Reset system")
 st.sidebar.divider()
 
+generator_choice = st.sidebar.selectbox(
+    "Answer Generator",
+    ["Groq (LLM API)", "Local (FLAN-T5)"],
+    index=0,
+)
+
+groq_model = None
+if generator_choice == "Groq (LLM API)":
+    groq_model = st.sidebar.selectbox(
+        "Groq Model",
+        [
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "mixtral-8x7b-32768",
+            "gemma2-9b-it",
+        ],
+        index=0,
+    )
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+if not GROQ_API_KEY:
+    msg = "GROQ_API_KEY is not set. Add it to your environment or a .env file."
+    if not DOTENV_LOADED:
+        msg += " Install python-dotenv to auto-load .env files."
+    st.sidebar.warning(msg)
+
+if generator_choice == "Groq (LLM API)" and not GROQ_API_KEY:
+    st.sidebar.error("Missing GROQ_API_KEY")
+
 # Retrieval options
 use_reranker = st.sidebar.checkbox("Use reranker (slower, better)", value=False)
+
+rewrite_mode = st.sidebar.selectbox(
+    "Query rewrite mode",
+    ["general", "medical"],
+    index=0,
+)
 
 if "stats" in st.session_state and st.session_state.stats:
     st.sidebar.subheader("📊 Processing Summary")
@@ -131,16 +177,27 @@ if st.session_state.index is not None:
     query = st.text_input("Ask a question")
 
     if query:
+        rewritten_query = rewrite_query_groq(query, mode=rewrite_mode)
+        with st.sidebar.expander("Rewritten retrieval query", expanded=False):
+            st.write(rewritten_query or "(empty)")
+
         initial = retrieve_chunks(
-            query,
+            rewritten_query or query,
             st.session_state.index,
             st.session_state.chunks,
             top_k=20 if use_reranker else 8,
         )
 
-        retrieved = rerank_chunks(query, initial, top_k=8) if use_reranker else initial[:8]
+        retrieved = rerank_chunks(query, initial, top_k=5) if use_reranker else initial[:8]
+        st.caption(f"Original query: {query}")
+        st.caption(f"Rewritten query: {rewritten_query or query}")
 
-        answer = generate_answer(query, retrieved)
+        if generator_choice == "Groq (LLM API)":
+            if not GROQ_API_KEY:
+                st.stop()
+            answer = generate_answer_groq(query, retrieved, model=groq_model)
+        else:
+            answer = generate_answer(query, retrieved)
 
         st.subheader("Answer")
         st.write(answer)
