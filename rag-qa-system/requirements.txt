@@ -6,6 +6,7 @@ rank-bm25
 torch
 transformers
 sentence-transformers
+sentence-transformers
 faiss-cpu
 numpy
 scikit-learn
@@ -23,3 +24,4 @@ tqdm
 python-dotenv
 pandas
 openai
+groq

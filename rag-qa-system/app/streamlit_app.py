@@ -15,6 +15,7 @@ from ingestion.chunker import chunk_text
 from embeddings.embedder import embed_texts
 from vector_store.faiss_index import build_index
 from retrieval.retriever import retrieve_chunks
+from retrieval.reranker import rerank_chunks
 from generation.generator import generate_answer
 
 
@@ -31,6 +32,9 @@ uploaded_files = st.sidebar.file_uploader(
 process = st.sidebar.button("✅ Process documents")
 reset = st.sidebar.button("🔄 Reset system")
 st.sidebar.divider()
+
+# Retrieval options
+use_reranker = st.sidebar.checkbox("Use reranker (slower, better)", value=False)
 
 if "stats" in st.session_state and st.session_state.stats:
     st.sidebar.subheader("📊 Processing Summary")
@@ -92,9 +96,9 @@ if process and uploaded_files:
                 doc_id = d["document_id"]
 
                 if ".pdf_page_" in doc_id.lower():
-                    all_chunks.extend(chunk_text(text, doc_id, chunk_size=200, overlap=50))
+                    all_chunks.extend(chunk_text(text, doc_id, chunk_size=180, overlap=60))
                 else:
-                    all_chunks.extend(chunk_text(text, doc_id, chunk_size=350, overlap=80))
+                    all_chunks.extend(chunk_text(text, doc_id, chunk_size=280, overlap=80))
 
         embeddings = embed_texts([c["text"] for c in all_chunks])
         index = build_index(embeddings)
@@ -127,12 +131,14 @@ if st.session_state.index is not None:
     query = st.text_input("Ask a question")
 
     if query:
-        retrieved = retrieve_chunks(
+        initial = retrieve_chunks(
             query,
             st.session_state.index,
             st.session_state.chunks,
-            top_k=8,
+            top_k=20 if use_reranker else 8,
         )
+
+        retrieved = rerank_chunks(query, initial, top_k=8) if use_reranker else initial[:8]
 
         answer = generate_answer(query, retrieved)
 

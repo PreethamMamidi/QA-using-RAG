@@ -111,7 +111,8 @@ def generate_answer(
 
 	context = build_context(chunks, max_tokens=max_context_tokens)
 	prompt = (
-		"Answer the question based on the context below.\n\n"
+		"You are a helpful assistant. Answer in clear, complete sentences (1-3). "
+		"If the context is insufficient, say you do not know. Do not answer with a single word.\n\n"
 		"Context:\n"
 		f"{context}\n\n"
 		"Question:\n"
