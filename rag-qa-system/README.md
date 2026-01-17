@@ -1,60 +1,103 @@
 # RAG QA System
+# RAG QA System
 
-A powerful, locally-run Retrieval-Augmented Generation (RAG) system for question answering over your documents. Built entirely on your CPU without relying on any external APIs, ensuring privacy and control.
+A Retrieval-Augmented Generation (RAG) system for asking questions over local documents.
+This project supports two generation modes:
 
-## 🌟 Features
+- Local: runs a CPU-friendly FLAN-T5 model locally (`generation/generator.py`).
+- Groq: uses the Groq API for generation and query rewriting (`generation/groq_generator.py`, `retrieval/query_rewrite.py`).
 
-- **Document Ingestion**: Upload and process PDF and TXT files seamlessly
-- **Intelligent Chunking**: Smart text splitting with configurable chunk sizes and overlaps for optimal retrieval
-- **Local Embeddings**: Uses Sentence Transformers for high-quality text embeddings, all running locally
-- **Efficient Retrieval**: FAISS-powered vector search for fast, accurate document retrieval
-- **Answer Generation**: Leverages FLAN-T5 model for coherent, context-aware answers
-- **Web Interface**: Clean Streamlit app for easy interaction
-- **Persistent Storage**: Saves processed data and indexes for quick reloading
-- **Evaluation Metrics**: Built-in tools to assess retrieval and QA performance
-- **Batch Processing**: Command-line interface for processing large document collections
+You can switch between modes in the Streamlit UI or call the corresponding functions from code.
 
-## 🛠 Technologies Used
+## Quick summary — Local vs Groq
 
-- **Python**: Core programming language
-- **Streamlit**: Web app framework for the user interface
-- **Sentence Transformers**: For generating text embeddings (`all-MiniLM-L6-v2`)
-- **FAISS**: High-performance vector similarity search
-- **Transformers**: Hugging Face library for the FLAN-T5 generation model (`google/flan-t5-small`)
-- **PyTorch**: Deep learning framework (CPU-only)
-- **PyMuPDF & PyPDF**: PDF document processing
-- **NLTK**: Natural language processing utilities
-- **NumPy & Scikit-learn**: Numerical computing and machine learning tools
-- **Pandas**: Data manipulation
+- Local (FLAN-T5)
+  - Uses `google/flan-t5-small` via `generation/generator.py` (CPU-only).
+  - Requirements: `requirements.txt` (includes `transformers`, `torch`, `sentence-transformers`), sufficient disk space for model weights, and internet the first time to download models.
+  - Privacy: documents and prompts stay on your machine.
 
-## 🚀 Installation
+- Groq (LLM API)
+  - Uses the `groq` SDK and Groq chat completion models (`generation/groq_generator.py`).
+  - Requirements: a Groq account and API key set as `GROQ_API_KEY` in your environment (or in a `.env` file). The `groq` package is listed in `requirements.txt`.
+  - Behavior: sends context to Groq's API — requires internet and will transmit document context to Groq.
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/PreethamMamidi/QA-using-RAG.git
-   cd QA-using-RAG/rag-qa-system
-   ```
+## Repo layout (important files)
 
-2. Create a virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
+- `app/streamlit_app.py` — interactive UI and mode switch
+- `ingestion/` — `loader.py`, `cleaner.py`, `chunker.py`
+- `embeddings/embedder.py` — sentence-transformers embedding code
+- `vector_store/faiss_index.py` — FAISS index build/load
+- `retrieval/` — `retriever.py`, `reranker.py`, `query_rewrite.py` (uses Groq when `GROQ_API_KEY` is set)
+- `generation/` — `generator.py` (local FLAN-T5) and `groq_generator.py` (Groq API)
+- `data/` — `raw_docs/` and `processed_chunks/`
+- `storage/` — persisted index and chunk metadata
 
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+## Installation (quick)
 
-4. Download NLTK tokenizer resources:
-   ```bash
-   python -c "import nltk; nltk.download('punkt')"
-   ```
+1. Create and activate a Python virtual environment:
 
-## 📖 Usage
+```bash
+python -m venv venv
+# Windows
+venv\Scripts\activate
+# macOS / Linux
+source venv/bin/activate
+```
 
-### Web App (Recommended)
-Run the Streamlit interface for an interactive experience:
+2. Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+3. (Optional) Create a `.env` file or set environment variables. For Groq mode set:
+
+```bash
+# Windows (PowerShell)
+$env:GROQ_API_KEY = "your_groq_api_key"
+
+# macOS / Linux
+export GROQ_API_KEY="your_groq_api_key"
+```
+
+Note: `generation/groq_generator.py` expects `GROQ_API_KEY` to be set. `retrieval/query_rewrite.py` will fall back to the original query if the key is not present.
+
+## Running the app
+
+Start the Streamlit UI and choose the generator in the sidebar:
+
+```bash
+streamlit run app/streamlit_app.py
+```
+
+- In the sidebar choose **Groq (LLM API)** or **Local (FLAN-T5)**.
+- If Groq is selected, set `GROQ_API_KEY` and pick a Groq model from the drop-down.
+
+## How switching works
+
+- The Streamlit UI triggers `generate_answer_groq` when **Groq** is selected and `generate_answer` when **Local** is selected.
+- The query rewrite step uses `retrieval/query_rewrite.py` which attempts to use Groq if `GROQ_API_KEY` is present; otherwise it returns the original query.
+
+## Security & privacy
+
+- Local mode: no network calls for generation — documents remain local.
+- Groq mode: document context is sent to Groq's API. Do not enable Groq mode for sensitive documents unless you accept external transmission.
+
+## Examples (quick)
+
+- Add a short text file at `data/raw_docs/sample.txt` with: `AcmeCorp was founded in 1999 in Austin, Texas.`
+- Process documents via the Streamlit UI or `python run_pipeline.py`.
+- Ask: `When was AcmeCorp founded?` — local or Groq generator should return `1999` and cite the source file.
+
+## Troubleshooting
+
+- If Groq calls fail, confirm `GROQ_API_KEY` and network connectivity.
+- If the local model fails to load, ensure `torch` is installed and you have enough disk space to download `google/flan-t5-small`.
+
+## Next steps
+
+- I can add a short config snippet showing how to switch generators via environment variables or add a sample `data/raw_docs/sample.txt`. Tell me which you'd prefer.
+
 # RAG QA System
 
 A lightweight Retrieval-Augmented Generation (RAG) system for question answering over local documents. The project is designed to run on CPU-only machines without external APIs, prioritizing privacy and reproducibility.
