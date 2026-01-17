@@ -55,121 +55,135 @@ A powerful, locally-run Retrieval-Augmented Generation (RAG) system for question
 
 ### Web App (Recommended)
 Run the Streamlit interface for an interactive experience:
+# RAG QA System
+
+A lightweight Retrieval-Augmented Generation (RAG) system for question answering over local documents. The project is designed to run on CPU-only machines without external APIs, prioritizing privacy and reproducibility.
+
+## What this repo provides
+
+- A document ingestion pipeline (load, clean, chunk)
+- Local embedding generation using Sentence Transformers
+- FAISS-based vector indexing and retrieval
+- A generator layer that synthesizes answers from retrieved chunks
+- A Streamlit web UI for interactive exploration
+- Basic evaluation scripts for retrieval and QA components
+
+## Repo layout
+
+- `app/` — Streamlit front-end (`streamlit_app.py`)
+- `ingestion/` — loader, cleaner, and chunker utilities
+- `embeddings/` — code to compute and persist embeddings
+- `vector_store/` — FAISS index builder and loader
+- `retrieval/` — retrieval, reranking, and query rewriting code
+- `generation/` — response generation logic
+- `evaluation/` — retrieval and QA metrics
+- `data/` — `raw_docs/` for source files and `processed_chunks/` for outputs
+- `storage/` — persisted indexes and chunk metadata (e.g., `faiss.index`, `chunks.json`)
+
+## Quickstart (Local)
+
+1. Create and activate a Python virtual environment:
+
+```bash
+python -m venv venv
+# Windows
+venv\Scripts\activate
+# macOS / Linux
+source venv/bin/activate
+```
+
+2. Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+3. Download NLTK tokenizer models (one-time):
+
+```bash
+python -c "import nltk; nltk.download('punkt')"
+```
+
+4. Start the Streamlit app:
 
 ```bash
 streamlit run app/streamlit_app.py
 ```
 
-- Upload PDF or TXT files
-- Click "Process documents" to build the knowledge base
-- Ask questions and get AI-generated answers with source citations
-
-### Command Line
-For batch processing or headless operation:
+5. Alternatively, run the batch pipeline to process documents in `data/raw_docs/`:
 
 ```bash
 python run_pipeline.py
 ```
 
-Place your documents in `data/raw_docs/` and run the script for interactive QA.
+## Typical workflow
 
-## 📊 Evaluation
+1. Add documents (PDF or TXT) to `data/raw_docs/`.
+2. Run the ingestion pipeline (`run_pipeline.py`) or use the Streamlit UI to process documents.
+3. The pipeline will produce chunk files in `data/processed_chunks/`, compute embeddings, and build a FAISS index in `storage/`.
+4. Use the Streamlit UI or the retrieval/generation modules to ask questions; retrieved chunks are used as context for answer generation.
 
-The system includes built-in evaluation tools to assess the performance of the retrieval and QA components:
+## Key configuration points
 
-- **Retrieval Metrics**: Measure retrieval quality with precision@k and recall@k metrics
-- **QA Metrics**: Framework for evaluating answer quality (expandable for future implementations)
+- Chunk size and overlap: controlled in `ingestion/chunker.py` for retrieval fidelity versus index size.
+- Embedding model: see `embeddings/embedder.py` — default is a Sentence Transformers model for CPU-friendly performance.
+- Generator model: defined in `generation/generator.py` and `generation/groq_generator.py`. Swap models there if needed.
 
-You can use these metrics to benchmark different configurations, chunk sizes, or embedding models to optimize performance for your specific use case.
+## Evaluation
 
-## 🏗 Architecture
+- Retrieval metrics are implemented in `evaluation/retrieval_metrics.py`.
+- QA metrics are available in `evaluation/qa_metrics.py` for measuring answer quality against labeled data.
 
-The system follows a modular RAG pipeline:
+## Development notes
+
+- The code is organized to make component swaps straightforward: replace an embedding or generation model without changing the rest of the pipeline.
+- Keep models and large artifacts out of Git — use `storage/` for local indexes and `embeddings/` for serialized vectors.
+
+## Contributing
+
+1. Fork and create a branch for your feature.
+2. Add tests or validate behavior with the Streamlit app and `run_pipeline.py`.
+3. Open a pull request with a short description and rationale.
+
+## Examples (expected input / output)
+
+Below are simple examples showing the kind of documents you can add and the expected QA behavior.
+
+- Example document (place in `data/raw_docs/sample.txt`):
 
 ```
-Documents (PDF/TXT)
-    ↓
-Ingestion (Load & Clean)
-    ↓
-Chunks (Text Segments)
-    ↓
-Embedding (Sentence Transformers)
-    ↓
-Vectors (Dense Representations)
-    ↓
-Indexing (FAISS Vector Store)
-    ↓
-FAISS Index (Stored on Disk)
+AcmeCorp was founded in 1999 in Austin, Texas. Its flagship product is the RoadRunner trap used for pest control.
 ```
 
-**Query Processing:**
+- Example query:
+
 ```
-User Query
-    ↓
-Retrieval (Similarity Search)
-    ↓
-Relevant Chunks (Top-K Matches)
-    ↓
-Generation (FLAN-T5 Model)
-    ↓
-Answer (Context-Aware Response)
+When was AcmeCorp founded?
 ```
 
-### Pipeline Components
+- Expected retrieval + generation (simplified):
 
-1. **Ingestion**: Load and clean documents, then chunk them into manageable pieces
-2. **Embedding**: Convert text chunks to dense vector representations using Sentence Transformers
-3. **Indexing**: Build a FAISS index for efficient similarity search
-4. **Retrieval**: Find the most relevant chunks for a given query using vector similarity
-5. **Generation**: Use retrieved context to generate accurate answers with FLAN-T5
+```
+Retrieved chunk (source: sample.txt): "AcmeCorp was founded in 1999 in Austin, Texas."
+Answer: "AcmeCorp was founded in 1999."
+Sources: sample.txt
+```
 
-### Pipeline Components
-3. **Indexing**: Build a FAISS vector index for efficient similarity search
-4. **Retrieval**: Find the most relevant chunks for a given query
-5. **Generation**: Use retrieved context to generate accurate answers
+- Example multi-document scenario: add `data/raw_docs/policies.txt` and `data/raw_docs/overview.txt`. The retriever should return the most relevant chunk(s) and the generator should synthesize a concise answer that references the original source file(s).
 
-### Key Components
+Notes:
+- Process documents first (`python run_pipeline.py` or use the Streamlit UI) so chunks, embeddings, and the FAISS index are created.
+- The exact answer wording may vary depending on the chosen generation model, but relevant source chunks should be included with the response.
 
-- `ingestion/`: Document loading, cleaning, and chunking
-- `embeddings/`: Text embedding generation
-- `vector_store/`: FAISS index management
-- `retrieval/`: Similarity search and chunk retrieval
-- `generation/`: Answer synthesis using transformer models
-- `evaluation/`: Performance metrics and assessment tools
-- `app/`: Streamlit web interface
+## Troubleshooting
 
-## 💡 Key Highlights
+- If you run into out-of-memory issues, reduce batch sizes or switch to a smaller embedding/generation model.
+- For PDF parsing problems, check `ingestion/loader.py` and try converting PDFs to text before ingestion.
 
-- **100% Local**: Everything runs on your CPU - no internet required, no API keys needed
-- **Privacy-First**: Your documents never leave your machine
-- **Flexible**: Supports both interactive web app and command-line usage
-- **Extensible**: Modular design makes it easy to swap components or add features
-- **Efficient**: Optimized for CPU usage with batch processing and lazy loading
+## License
 
-## 🤝 Contributing
+This project is open source. See the LICENSE file in the repository root for details.
 
-We welcome contributions from the community! Here's how you can help improve the RAG QA System:
+---
 
-### Development Setup
-1. Fork the repository and clone your fork
-2. Follow the installation steps above
-3. Create a feature branch: `git checkout -b feature/your-feature-name`
-4. Make your changes and test thoroughly
-5. Ensure your code follows the existing style and includes appropriate docstrings
 
-### Testing
-- Test your changes with both the Streamlit app and command-line interface
-- Verify that document processing works correctly with various file types
-- Ensure the system runs smoothly on CPU-only environments
-
-### Pull Request Process
-1. Update the README if your changes affect usage or installation
-2. Ensure all tests pass and no new errors are introduced
-3. Provide a clear description of your changes and their benefits
-4. Reference any related issues in your PR description
-
-Thank you for helping make this project better!
-
-## 📄 License
-
-This project is open-source. Please check the license file for details.
