@@ -43,6 +43,11 @@ def clean_text(text: Optional[str]) -> str:
 
 	# Collapse any whitespace (spaces, tabs, newlines) to a single space.
 	normalized = re.sub(r"\s+", " ", ascii_text)
+	
+	normalized = re.sub(r"\bPage\s+\d+\b", " ", normalized, flags=re.IGNORECASE)
+	normalized = re.sub(r"\b\d+\s*/\s*\d+\b", " ", normalized) 
+	normalized = re.sub(r"\s+", " ", normalized) 
+	
 	lower = normalized.lower()
 	for marker in ["references", "bibliography"]:
 		idx = lower.find(marker)
@@ -51,4 +56,6 @@ def clean_text(text: Optional[str]) -> str:
 			break
 
 	return normalized.strip()
+
+    
 

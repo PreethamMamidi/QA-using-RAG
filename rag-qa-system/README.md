@@ -1,4 +1,4 @@
-# RAG QA System
+
 # RAG QA System
 
 A Retrieval-Augmented Generation (RAG) system for asking questions over local documents.
