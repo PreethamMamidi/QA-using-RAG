@@ -39,6 +39,12 @@ data/raw_docs/*
 data/processed_chunks/*
 !data/processed_chunks/.gitkeep
 
+# Runtime storage artifacts
+storage/*
+!storage/.gitkeep
+!storage/README.md
+!storage/.gitignore
+
 # Model caches and downloads
 .cache/
 models/
