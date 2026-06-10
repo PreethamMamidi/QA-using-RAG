@@ -112,6 +112,36 @@ def _derive_documents_from_chunks(chunks):
         document["total_pages"] = max(document["total_pages"], int(chunk.get("page") or 1))
     return list(documents.values())
 
+
+def _preview_rankings(results, limit=10):
+    preview = []
+    for rank, item in enumerate((results or [])[:limit], start=1):
+        preview.append(
+            {
+                "rank": rank,
+                "chunk_id": item.get("chunk_id"),
+                "document_id": item.get("document_id"),
+                "page": item.get("page"),
+                "score": item.get("score"),
+                "dense_score": item.get("dense_score"),
+                "bm25_score": item.get("bm25_score"),
+                "rrf_score": item.get("rrf_score"),
+                "retrieval": item.get("retrieval"),
+            }
+        )
+    return preview
+
+
+def _refresh_hybrid_retriever():
+    if st.session_state.index is None or not st.session_state.chunks:
+        st.session_state.hybrid_retriever = None
+        return
+
+    st.session_state.hybrid_retriever = HybridRetriever.from_chunks(
+        st.session_state.index,
+        st.session_state.chunks,
+    )
+
 from ingestion.loader import load_documents
 from ingestion.cleaner import clean_text
 from ingestion.chunker import chunk_text
@@ -119,6 +149,7 @@ from embeddings.embedder import embed_texts
 from vector_store.faiss_index import build_index
 from retrieval.retriever import retrieve_chunks
 from retrieval.reranker import rerank_chunks
+from retrieval.hybrid_retrieval import HybridRetriever
 from retrieval.query_rewrite import rewrite_query_groq
 from generation.generator import generate_answer
 from generation.groq_generator import generate_answer_groq
@@ -176,6 +207,13 @@ rewrite_mode = st.sidebar.selectbox(
     index=0,
 )
 
+enable_hybrid_retrieval = st.sidebar.checkbox("Enable hybrid retrieval", value=True)
+top_k_dense = st.sidebar.slider("Dense retrieval top_k", min_value=1, max_value=50, value=20 if use_reranker else 8)
+top_k_sparse = st.sidebar.slider("Sparse retrieval top_k", min_value=1, max_value=50, value=20 if use_reranker else 8)
+top_k_fused = st.sidebar.slider("Fused retrieval top_k", min_value=1, max_value=25, value=10 if use_reranker else 8)
+rrf_k = st.sidebar.slider("RRF constant", min_value=1, max_value=200, value=60)
+show_retrieval_debug = st.sidebar.checkbox("Show retrieval debug info", value=False)
+
 if "stats" in st.session_state and st.session_state.stats:
     st.sidebar.subheader("📊 Processing Summary")
     st.sidebar.write(f"📁 Files uploaded: {st.session_state.stats['files_uploaded']}")
@@ -189,6 +227,8 @@ if "index" not in st.session_state:
     st.session_state.index = None
 if "documents" not in st.session_state:
     st.session_state.documents = None
+if "hybrid_retriever" not in st.session_state:
+    st.session_state.hybrid_retriever = None
 
 documents_path = os.path.join(STORAGE_DIR, "documents.json")
 if (
@@ -207,6 +247,7 @@ if (
         st.session_state.documents = _derive_documents_from_chunks(st.session_state.chunks)
 
     st.session_state.index = faiss.read_index(os.path.join(STORAGE_DIR, "faiss.index"))
+    _refresh_hybrid_retriever()
 
     st.sidebar.success("Loaded saved index ✅")
 
@@ -216,6 +257,7 @@ if reset:
     st.session_state.index = None
     st.session_state.stats = None
     st.session_state.documents = None
+    st.session_state.hybrid_retriever = None
 
     # Delete saved files (if they exist)
     if os.path.exists(os.path.join(STORAGE_DIR, "faiss.index")):
@@ -259,6 +301,7 @@ if process and uploaded_files:
         st.session_state.chunks = all_chunks
         st.session_state.index = index
         st.session_state.documents = document_records
+        _refresh_hybrid_retriever()
         # ✅ Save index + chunks to disk
         os.makedirs(STORAGE_DIR, exist_ok=True)
 
@@ -293,16 +336,62 @@ if st.session_state.index is not None:
         with st.sidebar.expander("Rewritten retrieval query", expanded=False):
             st.write(rewritten_query or "(empty)")
 
-        initial = retrieve_chunks(
-            rewritten_query or query,
-            st.session_state.index,
-            st.session_state.chunks,
-            top_k=20 if use_reranker else 8,
-        )
+        retrieval_query = rewritten_query or query
+        retrieval_debug = None
+
+        if enable_hybrid_retrieval:
+            if st.session_state.hybrid_retriever is None:
+                _refresh_hybrid_retriever()
+
+            if show_retrieval_debug:
+                initial, retrieval_debug = st.session_state.hybrid_retriever.retrieve(
+                    retrieval_query,
+                    top_k_dense=top_k_dense,
+                    top_k_sparse=top_k_sparse,
+                    top_k_fused=top_k_fused,
+                    rrf_k=rrf_k,
+                    debug=True,
+                    return_debug=True,
+                )
+            else:
+                initial = st.session_state.hybrid_retriever.retrieve(
+                    retrieval_query,
+                    top_k_dense=top_k_dense,
+                    top_k_sparse=top_k_sparse,
+                    top_k_fused=top_k_fused,
+                    rrf_k=rrf_k,
+                    debug=False,
+                    return_debug=False,
+                )
+        else:
+            initial = retrieve_chunks(
+                retrieval_query,
+                st.session_state.index,
+                st.session_state.chunks,
+                top_k=top_k_dense,
+            )
+            if show_retrieval_debug:
+                retrieval_debug = {
+                    "dense_results": initial,
+                    "sparse_results": [],
+                    "fused_results": initial,
+                }
 
         retrieved = rerank_chunks(query, initial, top_k=5) if use_reranker else initial[:8]
         st.caption(f"Original query: {query}")
         st.caption(f"Rewritten query: {rewritten_query or query}")
+
+        if show_retrieval_debug and retrieval_debug is not None:
+            retrieval_debug["reranked_results"] = retrieved
+            with st.sidebar.expander("Retrieval debug info", expanded=False):
+                st.markdown("**Dense retrieval**")
+                st.json(_preview_rankings(retrieval_debug.get("dense_results", [])))
+                st.markdown("**Sparse retrieval**")
+                st.json(_preview_rankings(retrieval_debug.get("sparse_results", [])))
+                st.markdown("**Fused retrieval**")
+                st.json(_preview_rankings(retrieval_debug.get("fused_results", [])))
+                st.markdown("**Reranked results**")
+                st.json(_preview_rankings(retrieval_debug.get("reranked_results", [])))
 
         if generator_choice == "Groq (LLM API)":
             if not GROQ_API_KEY:
