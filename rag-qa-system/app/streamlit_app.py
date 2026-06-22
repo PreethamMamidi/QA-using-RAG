@@ -6,6 +6,8 @@ import tempfile
 import shutil
 import datetime
 import re
+import logging
+import stat
 
 # Optional .env loading
 try:
@@ -23,6 +25,7 @@ if ROOT_DIR not in sys.path:
 
 STORAGE_DIR = os.path.join(ROOT_DIR, "storage")
 RAW_DOCS_DIR = os.path.join(STORAGE_DIR, "raw_docs")
+LOGGER = logging.getLogger(__name__)
 
 
 def _slugify_document_name(filename: str) -> str:
@@ -113,6 +116,28 @@ def _derive_documents_from_chunks(chunks):
     return list(documents.values())
 
 
+def _load_chunks_from_sqlite():
+    from database.sqlite_repository import SQLiteMetadataRepository
+
+    repository = SQLiteMetadataRepository()
+    sqlite_chunks = repository.get_all_chunks()
+    print(f"Loaded chunks from SQLite: {len(sqlite_chunks)}")
+
+    json_path = os.path.join(STORAGE_DIR, "chunks.json")
+    if os.path.exists(json_path):
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                json_chunks = json.load(f)
+            print(f"Chunks in JSON: {len(json_chunks)}")
+            print(f"Chunks in SQLite: {len(sqlite_chunks)}")
+            print(f"Match: {len(json_chunks) == len(sqlite_chunks)}")
+        except Exception as exc:
+            LOGGER.exception("Failed to validate JSON chunk count against SQLite: %s", exc)
+            print(f"Failed to validate JSON chunk count against SQLite: {exc}")
+
+    return sqlite_chunks
+
+
 def _preview_rankings(results, limit=10):
     preview = []
     for rank, item in enumerate((results or [])[:limit], start=1):
@@ -130,6 +155,81 @@ def _preview_rankings(results, limit=10):
             }
         )
     return preview
+
+
+def _extract_chunk_index(chunk):
+    chunk_id = chunk.get("chunk_id", "")
+    match = re.search(r"_c(\d+)$", chunk_id)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def _sync_sqlite_metadata(document_records, chunks):
+    from database.sqlite_repository import SQLiteMetadataRepository
+
+    sqlite_chunk_count = 0
+    match = False
+
+    try:
+        repository = SQLiteMetadataRepository()
+        repository.clear_database()
+
+        chunk_totals = {}
+        for chunk in chunks:
+            document_id = chunk.get("document_id")
+            if not document_id:
+                continue
+            chunk_totals[document_id] = chunk_totals.get(document_id, 0) + 1
+
+        for document in document_records:
+            repository.insert_document(
+                document_id=document["document_id"],
+                filename=document["filename"],
+                upload_time=document["uploaded_at"],
+                total_chunks=chunk_totals.get(document["document_id"], 0),
+            )
+
+        repository.insert_chunks(
+            [
+                {
+                    "chunk_id": chunk["chunk_id"],
+                    "document_id": chunk["document_id"],
+                    "page": chunk.get("page"),
+                    "chunk_index": _extract_chunk_index(chunk),
+                    "text": chunk["text"],
+                }
+                for chunk in chunks
+            ]
+        )
+        sqlite_chunk_count = len(repository.get_all_chunks())
+        match = sqlite_chunk_count == len(chunks)
+    except Exception as exc:
+        LOGGER.exception("SQLite metadata sync failed: %s", exc)
+        print(f"SQLite metadata sync failed: {exc}")
+
+    print(f"JSON chunk count: {len(chunks)}")
+    print(f"SQLite chunk count: {sqlite_chunk_count}")
+    print(f"Match: {match}")
+
+    return sqlite_chunk_count, match
+
+
+def _remove_tree_safely(path):
+    def _handle_remove_error(func, target_path, exc_info):
+        try:
+            os.chmod(target_path, stat.S_IWRITE)
+            func(target_path)
+        except OSError:
+            raise exc_info[1]
+
+    try:
+        shutil.rmtree(path, onerror=_handle_remove_error)
+        return True
+    except OSError as exc:
+        LOGGER.exception("Failed to remove directory tree %s: %s", path, exc)
+        print(f"Failed to remove directory tree {path}: {exc}")
+        return False
 
 
 def _refresh_hybrid_retriever():
@@ -154,6 +254,8 @@ from retrieval.query_rewrite import rewrite_query_groq
 from generation.generator import generate_answer
 from generation.groq_generator import generate_answer_groq
 
+
+logging.basicConfig(level=logging.INFO)
 
 st.set_page_config(page_title="RAG QA System", layout="wide")
 st.title("📄 Retrieval-Augmented Question Answering")
@@ -234,11 +336,10 @@ documents_path = os.path.join(STORAGE_DIR, "documents.json")
 if (
     st.session_state.index is None
     and os.path.exists(os.path.join(STORAGE_DIR, "faiss.index"))
-    and os.path.exists(os.path.join(STORAGE_DIR, "chunks.json"))
+    and os.path.exists(os.path.join(STORAGE_DIR, "metadata.db"))
 ):
     import faiss
-    with open(os.path.join(STORAGE_DIR, "chunks.json"), "r", encoding="utf-8") as f:
-        st.session_state.chunks = json.load(f)
+    st.session_state.chunks = _load_chunks_from_sqlite()
 
     if os.path.exists(documents_path):
         with open(documents_path, "r", encoding="utf-8") as f:
@@ -267,7 +368,16 @@ if reset:
     if os.path.exists(documents_path):
         os.remove(documents_path)
     if os.path.exists(RAW_DOCS_DIR):
-        shutil.rmtree(RAW_DOCS_DIR)
+        removed_raw_docs = _remove_tree_safely(RAW_DOCS_DIR)
+        if not removed_raw_docs:
+            st.sidebar.warning("Could not fully remove storage/raw_docs. Close file sync/preview locks and try reset again.")
+    try:
+        from database.sqlite_repository import SQLiteMetadataRepository
+
+        SQLiteMetadataRepository().clear_database()
+    except Exception as exc:
+        LOGGER.exception("Failed to clear SQLite metadata during reset: %s", exc)
+        print(f"Failed to clear SQLite metadata during reset: {exc}")
 
     st.sidebar.success("System reset! Saved index deleted ✅")
     st.stop()
@@ -317,7 +427,13 @@ if process and uploaded_files:
         with open(os.path.join(STORAGE_DIR, "chunks.json"), "w", encoding="utf-8") as f:
             json.dump(all_chunks, f, ensure_ascii=False, indent=2)
 
+        sqlite_chunk_count, sqlite_match = _sync_sqlite_metadata(document_records, all_chunks)
+
         st.sidebar.success("Saved documents and index to storage/ ✅")
+
+        st.sidebar.caption(
+            f"SQLite metadata sync: {sqlite_chunk_count} chunks (match={sqlite_match})"
+        )
 
         st.session_state.stats = {
             "files_uploaded": len(uploaded_files),

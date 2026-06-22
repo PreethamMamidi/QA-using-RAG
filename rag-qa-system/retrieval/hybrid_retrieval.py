@@ -8,7 +8,7 @@ import faiss
 
 from retrieval.bm25_index import BM25Retriever
 from retrieval.fusion import reciprocal_rank_fusion
-from retrieval.retriever import retrieve_chunks
+from retrieval.retriever import materialize_chunk_records, retrieve_chunks
 
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ class HybridRetriever:
 		bm25_retriever: Optional[BM25Retriever] = None,
 	) -> None:
 		self.index = index
-		self.chunks = chunks or []
+		self.chunks = materialize_chunk_records(chunks)
 		self.bm25_retriever = bm25_retriever or BM25Retriever(self.chunks)
 
 	@classmethod

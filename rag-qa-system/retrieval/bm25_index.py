@@ -6,6 +6,8 @@ from typing import Dict, List, Sequence
 
 from rank_bm25 import BM25Okapi
 
+from retrieval.retriever import materialize_chunk_records
+
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +27,7 @@ class BM25Retriever:
 	"""
 
 	def __init__(self, chunks: Sequence[Dict[str, str]]):
-		self.chunks = [dict(chunk) for chunk in chunks or []]
+		self.chunks = materialize_chunk_records(list(chunks or []))
 		self.tokenized_corpus = [
 			tokenize_whitespace_lower((chunk.get("text") or ""))
 			for chunk in self.chunks

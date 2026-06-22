@@ -13,6 +13,11 @@ from embeddings.embedder import embed_texts
 from vector_store.faiss_index import search_index
 
 
+def materialize_chunk_records(chunks: List[Dict[str, str]] | None) -> List[Dict[str, str]]:
+	"""Copy chunk metadata into plain dicts while preserving existing keys."""
+	return [dict(chunk) for chunk in (chunks or [])]
+
+
 def _l2_normalize(x: np.ndarray, eps: float = 1e-12) -> np.ndarray:
 	"""L2-normalize rows of a 2D array, safely handling zeros."""
 	if x.ndim == 1:
@@ -57,6 +62,7 @@ def retrieve_chunks(
 	"""
 	if index is None:
 		raise ValueError("FAISS index is None.")
+	chunks = materialize_chunk_records(chunks)
 	if not isinstance(chunks, list) or len(chunks) == 0:
 		raise ValueError("Chunks list is empty or invalid.")
 	if not query or not query.strip():
