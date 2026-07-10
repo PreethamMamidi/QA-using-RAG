@@ -1,4 +1,3 @@
-import json
 import streamlit as st
 import sys
 import os
@@ -97,45 +96,114 @@ def _build_storage_schema(uploaded_files, docs):
     return documents, chunks
 
 
-def _derive_documents_from_chunks(chunks):
-    documents = {}
-    for chunk in chunks or []:
-        document_id = chunk.get("document_id")
-        if not document_id:
-            continue
-        document = documents.setdefault(
-            document_id,
-            {
-                "document_id": document_id,
-                "filename": chunk.get("filename") or document_id,
-                "uploaded_at": None,
-                "total_pages": 0,
-            },
-        )
-        document["total_pages"] = max(document["total_pages"], int(chunk.get("page") or 1))
-    return list(documents.values())
-
-
-def _load_chunks_from_sqlite():
+def _load_metadata_from_sqlite():
     from database.sqlite_repository import SQLiteMetadataRepository
 
     repository = SQLiteMetadataRepository()
-    sqlite_chunks = repository.get_all_chunks()
-    print(f"Loaded chunks from SQLite: {len(sqlite_chunks)}")
+    documents = repository.list_documents()
+    chunks = repository.get_all_chunks()
+    print(f"Loaded chunks from SQLite: {len(chunks)}")
+    return documents, chunks
 
-    json_path = os.path.join(STORAGE_DIR, "chunks.json")
-    if os.path.exists(json_path):
-        try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                json_chunks = json.load(f)
-            print(f"Chunks in JSON: {len(json_chunks)}")
-            print(f"Chunks in SQLite: {len(sqlite_chunks)}")
-            print(f"Match: {len(json_chunks) == len(sqlite_chunks)}")
-        except Exception as exc:
-            LOGGER.exception("Failed to validate JSON chunk count against SQLite: %s", exc)
-            print(f"Failed to validate JSON chunk count against SQLite: {exc}")
 
-    return sqlite_chunks
+def _render_knowledge_base_sidebar():
+    from database.sqlite_repository import SQLiteMetadataRepository
+
+    repository = SQLiteMetadataRepository()
+    st.sidebar.subheader("Knowledge Base")
+
+    doc_count = repository.get_document_count()
+    chunk_count = repository.get_chunk_count()
+
+    col_docs, col_chunks = st.sidebar.columns(2)
+    col_docs.metric("Documents", doc_count)
+    col_chunks.metric("Chunks", chunk_count)
+
+    if doc_count == 0:
+        st.sidebar.caption("No documents indexed yet. Upload and process files to build the knowledge base.")
+        return
+
+    for doc in repository.list_documents():
+        st.sidebar.markdown(f"**{doc['filename']}**")
+        st.sidebar.caption(
+            f"{doc['upload_time']} · {doc['total_chunks']} chunk"
+            f"{'s' if doc['total_chunks'] != 1 else ''}"
+        )
+
+
+def _render_document_filter_sidebar():
+    from database.sqlite_repository import SQLiteMetadataRepository
+
+    repository = SQLiteMetadataRepository()
+    documents = repository.list_documents()
+
+    st.sidebar.subheader("Document Filter")
+    filter_mode = st.sidebar.radio(
+        "Scope",
+        ["All Documents", "One document", "Multiple documents"],
+        index=0,
+    )
+
+    selected_document_ids: list[str] = []
+    if filter_mode == "All Documents":
+        st.sidebar.caption("Searching across the full knowledge base.")
+    elif not documents:
+        st.sidebar.caption("No documents available to filter.")
+    elif filter_mode == "One document":
+        options = {doc["filename"]: doc["document_id"] for doc in documents}
+        choice = st.sidebar.selectbox("Document", list(options.keys()))
+        selected_document_ids = [options[choice]]
+    else:
+        options = {doc["filename"]: doc["document_id"] for doc in documents}
+        choices = st.sidebar.multiselect("Documents", list(options.keys()))
+        selected_document_ids = [options[name] for name in choices]
+        if not selected_document_ids:
+            st.sidebar.warning("Select at least one document to filter retrieval.")
+
+    active_labels: list[str] = []
+    if filter_mode != "All Documents" and selected_document_ids:
+        filename_by_id = {doc["document_id"]: doc["filename"] for doc in documents}
+        active_labels = [
+            filename_by_id.get(document_id, document_id)
+            for document_id in selected_document_ids
+        ]
+        st.sidebar.markdown("**Active filters**")
+        for label in active_labels:
+            st.sidebar.markdown(f"- {label}")
+
+    return filter_mode, selected_document_ids, active_labels
+
+
+def _resolve_retrieval_scope(filter_mode, selected_document_ids, all_chunks):
+    if filter_mode == "All Documents":
+        return None, None, [], False
+
+    if not selected_document_ids:
+        return [], [], [], True
+
+    from database.sqlite_repository import SQLiteMetadataRepository
+
+    repository = SQLiteMetadataRepository()
+    sqlite_chunks = repository.get_chunks_by_documents(selected_document_ids)
+    chunk_id_to_index = {
+        chunk["chunk_id"]: idx for idx, chunk in enumerate(all_chunks or [])
+    }
+
+    candidate_indices: list[int] = []
+    retrieval_chunks = []
+    for chunk in sqlite_chunks:
+        idx = chunk_id_to_index.get(chunk["chunk_id"])
+        if idx is not None:
+            candidate_indices.append(idx)
+            retrieval_chunks.append(all_chunks[idx])
+
+    documents = repository.list_documents()
+    filename_by_id = {doc["document_id"]: doc["filename"] for doc in documents}
+    active_labels = [
+        filename_by_id.get(document_id, document_id)
+        for document_id in selected_document_ids
+    ]
+    return retrieval_chunks, candidate_indices, active_labels, False
 
 
 def _preview_rankings(results, limit=10):
@@ -168,9 +236,6 @@ def _extract_chunk_index(chunk):
 def _sync_sqlite_metadata(document_records, chunks):
     from database.sqlite_repository import SQLiteMetadataRepository
 
-    sqlite_chunk_count = 0
-    match = False
-
     try:
         repository = SQLiteMetadataRepository()
         repository.clear_database()
@@ -202,17 +267,9 @@ def _sync_sqlite_metadata(document_records, chunks):
                 for chunk in chunks
             ]
         )
-        sqlite_chunk_count = len(repository.get_all_chunks())
-        match = sqlite_chunk_count == len(chunks)
     except Exception as exc:
         LOGGER.exception("SQLite metadata sync failed: %s", exc)
         print(f"SQLite metadata sync failed: {exc}")
-
-    print(f"JSON chunk count: {len(chunks)}")
-    print(f"SQLite chunk count: {sqlite_chunk_count}")
-    print(f"Match: {match}")
-
-    return sqlite_chunk_count, match
 
 
 def _remove_tree_safely(path):
@@ -269,6 +326,10 @@ uploaded_files = st.sidebar.file_uploader(
 )
 process = st.sidebar.button("✅ Process documents")
 reset = st.sidebar.button("🔄 Reset system")
+st.sidebar.divider()
+_render_knowledge_base_sidebar()
+st.sidebar.divider()
+filter_mode, selected_document_ids, active_filter_labels = _render_document_filter_sidebar()
 st.sidebar.divider()
 
 generator_choice = st.sidebar.selectbox(
@@ -332,20 +393,13 @@ if "documents" not in st.session_state:
 if "hybrid_retriever" not in st.session_state:
     st.session_state.hybrid_retriever = None
 
-documents_path = os.path.join(STORAGE_DIR, "documents.json")
 if (
     st.session_state.index is None
     and os.path.exists(os.path.join(STORAGE_DIR, "faiss.index"))
     and os.path.exists(os.path.join(STORAGE_DIR, "metadata.db"))
 ):
     import faiss
-    st.session_state.chunks = _load_chunks_from_sqlite()
-
-    if os.path.exists(documents_path):
-        with open(documents_path, "r", encoding="utf-8") as f:
-            st.session_state.documents = json.load(f)
-    else:
-        st.session_state.documents = _derive_documents_from_chunks(st.session_state.chunks)
+    st.session_state.documents, st.session_state.chunks = _load_metadata_from_sqlite()
 
     st.session_state.index = faiss.read_index(os.path.join(STORAGE_DIR, "faiss.index"))
     _refresh_hybrid_retriever()
@@ -363,14 +417,16 @@ if reset:
     # Delete saved files (if they exist)
     if os.path.exists(os.path.join(STORAGE_DIR, "faiss.index")):
         os.remove(os.path.join(STORAGE_DIR, "faiss.index"))
-    if os.path.exists(os.path.join(STORAGE_DIR, "chunks.json")):
-        os.remove(os.path.join(STORAGE_DIR, "chunks.json"))
-    if os.path.exists(documents_path):
-        os.remove(documents_path)
     if os.path.exists(RAW_DOCS_DIR):
         removed_raw_docs = _remove_tree_safely(RAW_DOCS_DIR)
         if not removed_raw_docs:
             st.sidebar.warning("Could not fully remove storage/raw_docs. Close file sync/preview locks and try reset again.")
+    legacy_chunks_path = os.path.join(STORAGE_DIR, "chunks.json")
+    if os.path.exists(legacy_chunks_path):
+        os.remove(legacy_chunks_path)
+    legacy_documents_path = os.path.join(STORAGE_DIR, "documents.json")
+    if os.path.exists(legacy_documents_path):
+        os.remove(legacy_documents_path)
     try:
         from database.sqlite_repository import SQLiteMetadataRepository
 
@@ -410,7 +466,6 @@ if process and uploaded_files:
 
         st.session_state.chunks = all_chunks
         st.session_state.index = index
-        st.session_state.documents = document_records
         _refresh_hybrid_retriever()
         # ✅ Save index + chunks to disk
         os.makedirs(STORAGE_DIR, exist_ok=True)
@@ -419,21 +474,11 @@ if process and uploaded_files:
         import faiss
         faiss.write_index(index, os.path.join(STORAGE_DIR, "faiss.index"))
 
-# Save document metadata
-        with open(documents_path, "w", encoding="utf-8") as f:
-            json.dump(document_records, f, ensure_ascii=False, indent=2)
-
-# Save chunks metadata
-        with open(os.path.join(STORAGE_DIR, "chunks.json"), "w", encoding="utf-8") as f:
-            json.dump(all_chunks, f, ensure_ascii=False, indent=2)
-
-        sqlite_chunk_count, sqlite_match = _sync_sqlite_metadata(document_records, all_chunks)
+        _sync_sqlite_metadata(document_records, all_chunks)
+        st.session_state.documents, st.session_state.chunks = _load_metadata_from_sqlite()
+        _refresh_hybrid_retriever()
 
         st.sidebar.success("Saved documents and index to storage/ ✅")
-
-        st.sidebar.caption(
-            f"SQLite metadata sync: {sqlite_chunk_count} chunks (match={sqlite_match})"
-        )
 
         st.session_state.stats = {
             "files_uploaded": len(uploaded_files),
@@ -448,12 +493,33 @@ if st.session_state.index is not None:
     query = st.text_input("Ask a question")
 
     if query:
+        filtered_chunks, candidate_indices, scope_labels, filter_incomplete = _resolve_retrieval_scope(
+            filter_mode,
+            selected_document_ids,
+            st.session_state.chunks,
+        )
+        display_labels = scope_labels or active_filter_labels
+
         rewritten_query = rewrite_query_groq(query, mode=rewrite_mode)
         with st.sidebar.expander("Rewritten retrieval query", expanded=False):
             st.write(rewritten_query or "(empty)")
 
         retrieval_query = rewritten_query or query
         retrieval_debug = None
+
+        if filter_incomplete:
+            st.warning("Select at least one document to apply a document filter.")
+            st.stop()
+
+        if display_labels:
+            st.info(f"Retrieval limited to: {', '.join(display_labels)}")
+
+        retrieval_kwargs = {}
+        if filtered_chunks is not None:
+            retrieval_kwargs = {
+                "chunks": filtered_chunks,
+                "candidate_indices": candidate_indices,
+            }
 
         if enable_hybrid_retrieval:
             if st.session_state.hybrid_retriever is None:
@@ -468,6 +534,7 @@ if st.session_state.index is not None:
                     rrf_k=rrf_k,
                     debug=True,
                     return_debug=True,
+                    **retrieval_kwargs,
                 )
             else:
                 initial = st.session_state.hybrid_retriever.retrieve(
@@ -478,6 +545,7 @@ if st.session_state.index is not None:
                     rrf_k=rrf_k,
                     debug=False,
                     return_debug=False,
+                    **retrieval_kwargs,
                 )
         else:
             initial = retrieve_chunks(
@@ -485,6 +553,7 @@ if st.session_state.index is not None:
                 st.session_state.index,
                 st.session_state.chunks,
                 top_k=top_k_dense,
+                candidate_indices=candidate_indices if filtered_chunks is not None else None,
             )
             if show_retrieval_debug:
                 retrieval_debug = {

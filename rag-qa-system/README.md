@@ -121,7 +121,7 @@ A lightweight Retrieval-Augmented Generation (RAG) system for question answering
 - `generation/` — response generation logic
 - `evaluation/` — retrieval and QA metrics
 - `data/` — `raw_docs/` for source files and `processed_chunks/` for outputs
-- `storage/` — persisted indexes and chunk metadata (e.g., `faiss.index`, `chunks.json`)
+- `storage/` — persisted indexes and SQLite metadata (e.g., `faiss.index`, `metadata.db`)
 
 ## Quickstart (Local)
 

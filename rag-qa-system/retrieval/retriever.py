@@ -4,7 +4,7 @@ Retrieval utilities for the RAG QA system.
 Implements a simple function to embed a query, search a FAISS index built on
 L2-normalized chunk embeddings, and return the top matching chunks.
 """
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import faiss
@@ -32,6 +32,7 @@ def retrieve_chunks(
 	index: faiss.Index,
 	chunks: List[Dict[str, str]],
 	top_k: int = 5,
+	candidate_indices: Optional[List[int]] = None,
 ) -> List[Dict[str, str]]:
 	"""
 	Retrieve the most relevant text chunks for a query using FAISS.
@@ -70,7 +71,7 @@ def retrieve_chunks(
 
 	# Validate that index and chunks agree on count where possible
 	ntotal = getattr(index, "ntotal", None)
-	if ntotal is not None and ntotal != len(chunks):
+	if candidate_indices is None and ntotal is not None and ntotal != len(chunks):
 		raise ValueError(
 			f"Index/chunks size mismatch: index.ntotal={ntotal}, len(chunks)={len(chunks)}"
 		)
@@ -78,6 +79,27 @@ def retrieve_chunks(
 	# Embed and L2-normalize the query for cosine via inner product
 	q_vec = embed_texts([query], batch_size=1)
 	q_vec = _l2_normalize(q_vec)
+	query_vector = q_vec[0]
+
+	if candidate_indices is not None:
+		if not candidate_indices:
+			return []
+
+		scored_indices: List[tuple[int, float]] = []
+		for idx in candidate_indices:
+			if idx is None or idx < 0 or idx >= len(chunks):
+				continue
+			vector = index.reconstruct(int(idx))
+			score = float(np.dot(query_vector, vector))
+			scored_indices.append((int(idx), score))
+
+		scored_indices.sort(key=lambda item: item[1], reverse=True)
+		results: List[Dict[str, str]] = []
+		for idx, score in scored_indices[:top_k]:
+			item = dict(chunks[idx])
+			item["score"] = score
+			results.append(item)
+		return results
 
 	# Search the index
 	scores, inds = search_index(index, q_vec, top_k=top_k)
@@ -85,7 +107,7 @@ def retrieve_chunks(
 	inds = inds[0]
 
 	# Map indices back to chunks; filter invalid indices (-1) if any
-	results: List[Dict[str, str]] = []
+	results = []
 	for idx, score in zip(inds.tolist(), scores.tolist()):
 		if idx is None or idx < 0 or idx >= len(chunks):
 			continue

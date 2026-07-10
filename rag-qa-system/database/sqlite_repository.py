@@ -98,6 +98,15 @@ class SQLiteMetadataRepository(MetadataRepository):
                 payload,
             )
 
+    @staticmethod
+    def _document_row(row: sqlite3.Row) -> Dict[str, Any]:
+        return {
+            "document_id": row["document_id"],
+            "filename": row["filename"],
+            "upload_time": row["upload_time"],
+            "total_chunks": row["total_chunks"],
+        }
+
     def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
         with self._get_connection() as connection:
             row = connection.execute(
@@ -108,9 +117,9 @@ class SQLiteMetadataRepository(MetadataRepository):
                 """,
                 (document_id,),
             ).fetchone()
-        return dict(row) if row is not None else None
+        return self._document_row(row) if row is not None else None
 
-    def get_all_documents(self) -> List[Dict[str, Any]]:
+    def list_documents(self) -> List[Dict[str, Any]]:
         with self._get_connection() as connection:
             rows = connection.execute(
                 """
@@ -119,12 +128,41 @@ class SQLiteMetadataRepository(MetadataRepository):
                 ORDER BY upload_time DESC, document_id ASC
                 """
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [self._document_row(row) for row in rows]
+
+    def document_exists(self, document_id: str) -> bool:
+        with self._get_connection() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM documents WHERE document_id = ? LIMIT 1",
+                (document_id,),
+            ).fetchone()
+        return row is not None
+
+    def get_document_count(self) -> int:
+        with self._get_connection() as connection:
+            row = connection.execute("SELECT COUNT(*) AS count FROM documents").fetchone()
+        return int(row["count"]) if row is not None else 0
+
+    def get_chunk_count(self) -> int:
+        with self._get_connection() as connection:
+            row = connection.execute("SELECT COUNT(*) AS count FROM chunks").fetchone()
+        return int(row["count"]) if row is not None else 0
+
+    def get_all_documents(self) -> List[Dict[str, Any]]:
+        return self.list_documents()
 
     def get_chunks_by_document(self, document_id: str) -> List[Dict[str, Any]]:
+        return self.get_chunks_by_documents([document_id])
+
+    def get_chunks_by_documents(self, document_ids: Sequence[str]) -> List[Dict[str, Any]]:
+        ids = [doc_id for doc_id in document_ids if doc_id]
+        if not ids:
+            return []
+
+        placeholders = ", ".join("?" * len(ids))
         with self._get_connection() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT
                     chunks.chunk_id,
                     chunks.document_id,
@@ -134,13 +172,14 @@ class SQLiteMetadataRepository(MetadataRepository):
                     chunks.text
                 FROM chunks
                 JOIN documents ON documents.document_id = chunks.document_id
-                WHERE chunks.document_id = ?
+                WHERE chunks.document_id IN ({placeholders})
                 ORDER BY
+                    chunks.document_id ASC,
                     COALESCE(chunks.page, 0) ASC,
                     COALESCE(chunks.chunk_index, 0) ASC,
                     chunks.chunk_id ASC
                 """,
-                (document_id,),
+                ids,
             ).fetchall()
         return [dict(row) for row in rows]
 

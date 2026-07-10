@@ -69,16 +69,43 @@ class HybridRetriever:
 		rrf_k: int = 60,
 		debug: bool = False,
 		return_debug: bool = False,
+		chunks: Optional[List[Dict[str, str]]] = None,
+		candidate_indices: Optional[List[int]] = None,
 	) -> List[Dict[str, str]] | Tuple[List[Dict[str, str]], Dict[str, List[Dict[str, str]]]]:
 		"""Retrieve chunks via dense, sparse, and RRF fusion.
 
 		The returned chunk objects remain compatible with the existing reranker.
+		When ``chunks`` is provided, BM25 runs on that subset only. When
+		``candidate_indices`` is provided, dense search is restricted to those
+		FAISS row indices while metadata is read from the full corpus.
 		"""
 		if not query or not query.strip():
 			return ([], {"dense_results": [], "sparse_results": [], "fused_results": []}) if return_debug else []
 
-		dense_results = retrieve_chunks(query, self.index, self.chunks, top_k=top_k_dense)
-		sparse_results = self.bm25_retriever.retrieve(query, top_k=top_k_sparse, debug=debug)
+		active_chunks = materialize_chunk_records(chunks) if chunks is not None else self.chunks
+		if not active_chunks:
+			return ([], {"dense_results": [], "sparse_results": [], "fused_results": []}) if return_debug else []
+
+		active_candidate_indices = candidate_indices
+		if chunks is not None and active_candidate_indices is None:
+			filtered_chunk_ids = {chunk.get("chunk_id") for chunk in active_chunks}
+			active_candidate_indices = [
+				idx
+				for idx, chunk in enumerate(self.chunks)
+				if chunk.get("chunk_id") in filtered_chunk_ids
+			]
+
+		dense_results = retrieve_chunks(
+			query,
+			self.index,
+			self.chunks,
+			top_k=top_k_dense,
+			candidate_indices=active_candidate_indices,
+		)
+		if chunks is not None:
+			sparse_results = BM25Retriever(active_chunks).retrieve(query, top_k=top_k_sparse, debug=debug)
+		else:
+			sparse_results = self.bm25_retriever.retrieve(query, top_k=top_k_sparse, debug=debug)
 		fused_results = reciprocal_rank_fusion(
 			[dense_results, sparse_results],
 			k=rrf_k,
