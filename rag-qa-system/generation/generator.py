@@ -9,6 +9,8 @@ from typing import Dict, List, Tuple, Optional
 import torch
 from transformers import T5Tokenizer, T5ForConditionalGeneration
 
+from generation.prompts import ANSWER_INSTRUCTIONS
+
 
 _TOKENIZER: Optional[T5Tokenizer] = None
 _MODEL: Optional[T5ForConditionalGeneration] = None
@@ -84,7 +86,7 @@ def generate_answer(
 	question: str,
 	chunks: List[Dict[str, str]],
 	max_context_tokens: int = 512,
-	max_new_tokens: int = 128,
+	max_new_tokens: int = 256,
 ) -> str:
 	"""Generate an answer for a question using retrieved context and FLAN-T5.
 
@@ -97,7 +99,7 @@ def generate_answer(
 	max_context_tokens : int, optional
 		Approximate max context token budget (whitespace tokens), by default 512.
 	max_new_tokens : int, optional
-		Maximum tokens to generate, by default 128.
+		Maximum tokens to generate, by default 256.
 
 	Returns
 	-------
@@ -111,8 +113,7 @@ def generate_answer(
 
 	context = build_context(chunks, max_tokens=max_context_tokens)
 	prompt = (
-		"You are a helpful assistant. Answer in clear, complete sentences (1-3). "
-		"If the context is insufficient, say you do not know. Do not answer with a single word.\n\n"
+		f"{ANSWER_INSTRUCTIONS}\n\n"
 		"Context:\n"
 		f"{context}\n\n"
 		"Question:\n"

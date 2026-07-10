@@ -4,6 +4,8 @@ import os
 
 from groq import Groq
 
+from generation.prompts import GROQ_ANSWER_INSTRUCTIONS
+
 
 def build_context(chunks: List[Dict[str, str]], max_chars: int = 8000) -> str:
     """Build a context string from retrieved chunks with source metadata.
@@ -99,16 +101,7 @@ def generate_answer_groq(
     if len(context.strip()) < 200:
         return "I don't know based on the uploaded document."
 
-    system_prompt = (
-        "You are a concise assistant. Answer using ONLY the provided context. "
-        "Respond in 1 to 3 complete sentences. "
-        "If the context lacks the answer, reply: 'I don't know based on the uploaded document.' "
-        "Do not copy the context verbatim. "
-        "Include citations in the final answer like '(Source: Lec16.pdf_page_4)'. "
-        "Cite the best 1-2 sources max. "
-        "Do not repeat the question. "
-        "Avoid bullet lists unless the user explicitly asks for them."
-    )
+    system_prompt = GROQ_ANSWER_INSTRUCTIONS
 
     client = Groq(api_key=api_key)
 
@@ -116,6 +109,7 @@ def generate_answer_groq(
         completion = client.chat.completions.create(
             model=model,
             temperature=temperature,
+            max_tokens=1024,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {
