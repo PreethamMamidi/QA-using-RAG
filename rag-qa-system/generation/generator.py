@@ -4,10 +4,11 @@ Answer generation utilities for the RAG QA system.
 Uses the `google/flan-t5-small` model locally on CPU to generate answers
 based on retrieved context chunks.
 """
-from typing import Dict, List, Tuple, Optional
+from threading import Thread
+from typing import Dict, Iterator, List, Tuple, Optional
 
 import torch
-from transformers import T5Tokenizer, T5ForConditionalGeneration
+from transformers import T5Tokenizer, T5ForConditionalGeneration, TextIteratorStreamer
 
 from generation.prompts import ANSWER_INSTRUCTIONS
 
@@ -82,6 +83,65 @@ def build_context(chunks: List[Dict[str, str]], max_tokens: int = 512) -> str:
 	return "\n\n".join(parts).strip()
 
 
+def _build_generation_prompt(
+	question: str,
+	chunks: List[Dict[str, str]],
+	max_context_tokens: int = 512,
+) -> str:
+	context = build_context(chunks, max_tokens=max_context_tokens)
+	return (
+		f"{ANSWER_INSTRUCTIONS}\n\n"
+		"Context:\n"
+		f"{context}\n\n"
+		"Question:\n"
+		f"{question}\n\n"
+		"Answer:"
+	)
+
+
+def stream_answer(
+	question: str,
+	chunks: List[Dict[str, str]],
+	max_context_tokens: int = 512,
+	max_new_tokens: int = 256,
+) -> Iterator[str]:
+	"""Stream an answer incrementally using FLAN-T5 on CPU."""
+	if not question or not question.strip():
+		return
+
+	tokenizer, model = get_generator()
+	prompt = _build_generation_prompt(question, chunks, max_context_tokens=max_context_tokens)
+
+	inputs = tokenizer(
+		prompt,
+		return_tensors="pt",
+		truncation=True,
+		padding=False,
+	)
+	input_ids = inputs.input_ids.to(_DEVICE)
+	attention_mask = inputs.attention_mask.to(_DEVICE)
+
+	streamer = TextIteratorStreamer(tokenizer, skip_special_tokens=True)
+	generation_kwargs = {
+		"input_ids": input_ids,
+		"attention_mask": attention_mask,
+		"max_new_tokens": max_new_tokens,
+		"do_sample": False,
+		"num_beams": 1,
+		"streamer": streamer,
+	}
+
+	def _generate() -> None:
+		with torch.no_grad():
+			model.generate(**generation_kwargs)
+
+	thread = Thread(target=_generate)
+	thread.start()
+	for text in streamer:
+		yield text
+	thread.join()
+
+
 def generate_answer(
 	question: str,
 	chunks: List[Dict[str, str]],
@@ -106,39 +166,12 @@ def generate_answer(
 	str
 		Generated answer string.
 	"""
-	if not question or not question.strip():
-		return ""
-
-	tokenizer, model = get_generator()
-
-	context = build_context(chunks, max_tokens=max_context_tokens)
-	prompt = (
-		f"{ANSWER_INSTRUCTIONS}\n\n"
-		"Context:\n"
-		f"{context}\n\n"
-		"Question:\n"
-		f"{question}\n\n"
-		"Answer:"
-	)
-
-	inputs = tokenizer(
-		prompt,
-		return_tensors="pt",
-		truncation=True,
-		padding=False,
-	)
-	input_ids = inputs.input_ids.to(_DEVICE)
-	attention_mask = inputs.attention_mask.to(_DEVICE)
-
-	with torch.no_grad():
-		output_ids = model.generate(
-			input_ids=input_ids,
-			attention_mask=attention_mask,
+	return "".join(
+		stream_answer(
+			question,
+			chunks,
+			max_context_tokens=max_context_tokens,
 			max_new_tokens=max_new_tokens,
-			do_sample=False,  # greedy decoding
-			num_beams=1,
 		)
-
-	answer = tokenizer.decode(output_ids[0], skip_special_tokens=True)
-	return answer.strip()
+	).strip()
 

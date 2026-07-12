@@ -308,8 +308,8 @@ from retrieval.retriever import retrieve_chunks
 from retrieval.reranker import rerank_chunks
 from retrieval.hybrid_retrieval import HybridRetriever
 from retrieval.query_rewrite import rewrite_query_groq
-from generation.generator import generate_answer
-from generation.groq_generator import generate_answer_groq
+from generation.generator import stream_answer
+from generation.groq_generator import stream_answer_groq
 
 
 logging.basicConfig(level=logging.INFO)
@@ -521,48 +521,50 @@ if st.session_state.index is not None:
                 "candidate_indices": candidate_indices,
             }
 
-        if enable_hybrid_retrieval:
-            if st.session_state.hybrid_retriever is None:
-                _refresh_hybrid_retriever()
+        with st.spinner("Retrieving relevant context..."):
+            if enable_hybrid_retrieval:
+                if st.session_state.hybrid_retriever is None:
+                    _refresh_hybrid_retriever()
 
-            if show_retrieval_debug:
-                initial, retrieval_debug = st.session_state.hybrid_retriever.retrieve(
-                    retrieval_query,
-                    top_k_dense=top_k_dense,
-                    top_k_sparse=top_k_sparse,
-                    top_k_fused=top_k_fused,
-                    rrf_k=rrf_k,
-                    debug=True,
-                    return_debug=True,
-                    **retrieval_kwargs,
-                )
+                if show_retrieval_debug:
+                    initial, retrieval_debug = st.session_state.hybrid_retriever.retrieve(
+                        retrieval_query,
+                        top_k_dense=top_k_dense,
+                        top_k_sparse=top_k_sparse,
+                        top_k_fused=top_k_fused,
+                        rrf_k=rrf_k,
+                        debug=True,
+                        return_debug=True,
+                        **retrieval_kwargs,
+                    )
+                else:
+                    initial = st.session_state.hybrid_retriever.retrieve(
+                        retrieval_query,
+                        top_k_dense=top_k_dense,
+                        top_k_sparse=top_k_sparse,
+                        top_k_fused=top_k_fused,
+                        rrf_k=rrf_k,
+                        debug=False,
+                        return_debug=False,
+                        **retrieval_kwargs,
+                    )
             else:
-                initial = st.session_state.hybrid_retriever.retrieve(
+                initial = retrieve_chunks(
                     retrieval_query,
-                    top_k_dense=top_k_dense,
-                    top_k_sparse=top_k_sparse,
-                    top_k_fused=top_k_fused,
-                    rrf_k=rrf_k,
-                    debug=False,
-                    return_debug=False,
-                    **retrieval_kwargs,
+                    st.session_state.index,
+                    st.session_state.chunks,
+                    top_k=top_k_dense,
+                    candidate_indices=candidate_indices if filtered_chunks is not None else None,
                 )
-        else:
-            initial = retrieve_chunks(
-                retrieval_query,
-                st.session_state.index,
-                st.session_state.chunks,
-                top_k=top_k_dense,
-                candidate_indices=candidate_indices if filtered_chunks is not None else None,
-            )
-            if show_retrieval_debug:
-                retrieval_debug = {
-                    "dense_results": initial,
-                    "sparse_results": [],
-                    "fused_results": initial,
-                }
+                if show_retrieval_debug:
+                    retrieval_debug = {
+                        "dense_results": initial,
+                        "sparse_results": [],
+                        "fused_results": initial,
+                    }
 
-        retrieved = rerank_chunks(query, initial, top_k=5) if use_reranker else initial[:8]
+            retrieved = rerank_chunks(query, initial, top_k=5) if use_reranker else initial[:8]
+
         st.caption(f"Original query: {query}")
         st.caption(f"Rewritten query: {rewritten_query or query}")
 
@@ -578,15 +580,13 @@ if st.session_state.index is not None:
                 st.markdown("**Reranked results**")
                 st.json(_preview_rankings(retrieval_debug.get("reranked_results", [])))
 
+        st.subheader("Answer")
         if generator_choice == "Groq (LLM API)":
             if not GROQ_API_KEY:
                 st.stop()
-            answer = generate_answer_groq(query, retrieved, model=groq_model)
+            st.write_stream(stream_answer_groq(query, retrieved, model=groq_model))
         else:
-            answer = generate_answer(query, retrieved)
-
-        st.subheader("Answer")
-        st.write(answer)
+            st.write_stream(stream_answer(query, retrieved))
 
         st.subheader("Sources")
         for r in retrieved:

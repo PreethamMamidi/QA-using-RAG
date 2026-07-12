@@ -1,5 +1,5 @@
 """Groq-powered answer generation for the RAG system."""
-from typing import Dict, List
+from typing import Dict, Iterator, List
 import os
 
 from groq import Groq
@@ -66,6 +66,62 @@ def build_context(chunks: List[Dict[str, str]], max_chars: int = 8000) -> str:
     return "".join(parts).strip()
 
 
+def _prepare_groq_request(
+    question: str,
+    chunks: List[Dict[str, str]],
+) -> tuple[str, str, str] | tuple[None, None, str]:
+    """Return (api_key, system_prompt, user_message) or (None, None, error_message)."""
+    if not question or not question.strip():
+        return None, None, ""
+
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        return None, None, "GROQ_API_KEY is not set. Please configure it in your environment."
+
+    context = build_context(chunks)
+    if len(context.strip()) < 200:
+        return None, None, "I don't know based on the uploaded document."
+
+    user_message = f"Context:\n{context}\n\nQuestion:\n{question}"
+    return api_key, GROQ_ANSWER_INSTRUCTIONS, user_message
+
+
+def stream_answer_groq(
+    question: str,
+    chunks: List[Dict[str, str]],
+    model: str = "llama-3.3-70b-versatile",
+    temperature: float = 0.2,
+) -> Iterator[str]:
+    """Stream an answer token-by-token using Groq chat completions."""
+    api_key, system_prompt, user_message = _prepare_groq_request(question, chunks)
+    if api_key is None:
+        if user_message:
+            yield user_message
+        return
+
+    client = Groq(api_key=api_key)
+
+    try:
+        stream = client.chat.completions.create(
+            model=model,
+            temperature=temperature,
+            max_tokens=1024,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            stream=True,
+        )
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
+    except Exception as exc:  # pragma: no cover - network/SDK errors
+        yield f"Error calling Groq API: {exc}"
+
+
 def generate_answer_groq(
     question: str,
     chunks: List[Dict[str, str]],
@@ -90,37 +146,11 @@ def generate_answer_groq(
     str
         Generated answer text or an informative error string.
     """
-    if not question or not question.strip():
-        return ""
-
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        return "GROQ_API_KEY is not set. Please configure it in your environment."
-
-    context = build_context(chunks)
-    if len(context.strip()) < 200:
-        return "I don't know based on the uploaded document."
-
-    system_prompt = GROQ_ANSWER_INSTRUCTIONS
-
-    client = Groq(api_key=api_key)
-
-    try:
-        completion = client.chat.completions.create(
+    return "".join(
+        stream_answer_groq(
+            question,
+            chunks,
             model=model,
             temperature=temperature,
-            max_tokens=1024,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": f"Context:\n{context}\n\nQuestion:\n{question}",
-                },
-            ],
         )
-    except Exception as exc:  # pragma: no cover - network/SDK errors
-        return f"Error calling Groq API: {exc}"
-
-    message = completion.choices[0].message if completion.choices else None
-    answer = getattr(message, "content", "") if message else ""
-    return (answer or "").strip()
+    ).strip()
