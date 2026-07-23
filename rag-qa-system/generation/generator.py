@@ -11,6 +11,7 @@ import torch
 from transformers import T5Tokenizer, T5ForConditionalGeneration, TextIteratorStreamer
 
 from generation.prompts import ANSWER_INSTRUCTIONS
+from retrieval.citations import SourceCitation
 
 
 _TOKENIZER: Optional[T5Tokenizer] = None
@@ -65,6 +66,12 @@ def build_context(chunks: List[Dict[str, str]], max_tokens: int = 512) -> str:
 		t = (ch.get("text", "") or "").strip()
 		if not t:
 			continue
+		source_label = SourceCitation(
+			document_id=str(ch.get("document_id") or "unknown"),
+			filename=str(ch.get("filename") or ch.get("document_id") or "unknown"),
+			page=ch.get("page"),
+		).label()
+		prefix = f"[SOURCE: {source_label}] "
 		toks = t.split()
 		if not toks:
 			continue
@@ -72,11 +79,11 @@ def build_context(chunks: List[Dict[str, str]], max_tokens: int = 512) -> str:
 		if remaining <= 0:
 			break
 		if len(toks) <= remaining:
-			parts.append(t)
-			token_count += len(toks)
+			parts.append(prefix + t)
+			token_count += len((prefix + t).split())
 		else:
 			# Truncate to fit remaining tokens
-			parts.append(" ".join(toks[:remaining]))
+			parts.append(prefix + " ".join(toks[:remaining]))
 			token_count += remaining
 			break
 

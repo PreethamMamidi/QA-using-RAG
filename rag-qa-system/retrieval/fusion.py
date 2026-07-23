@@ -5,6 +5,8 @@ import logging
 from typing import Dict, List, Optional, Sequence
 
 
+from retrieval.citations import merge_chunk_metadata
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,13 +49,15 @@ def reciprocal_rank_fusion(
 			contribution = 1.0 / (k + rank)
 
 			if key not in aggregated:
-				aggregated[key] = dict(item)
+				aggregated[key] = merge_chunk_metadata({}, item)
 				aggregated[key]["rrf_score"] = 0.0
 				aggregated[key]["score"] = 0.0
 				aggregated[key]["rrf_sources"] = []
 				aggregated[key]["rrf_details"] = []
 
 			entry = aggregated[key]
+			entry = merge_chunk_metadata(entry, item)
+			aggregated[key] = entry
 			entry["rrf_score"] = float(entry.get("rrf_score", 0.0) + contribution)
 			entry["score"] = float(entry["rrf_score"])
 			entry["rrf_details"].append(
@@ -68,9 +72,7 @@ def reciprocal_rank_fusion(
 			if retrieval_name and retrieval_name not in entry["rrf_sources"]:
 				entry["rrf_sources"].append(retrieval_name)
 
-			for field in ("dense_score", "bm25_score", "document_id", "filename", "page"):
-				if field in item and field not in entry:
-					entry[field] = item[field]
+			entry["retrieval"] = "rrf"
 
 	results = sorted(aggregated.values(), key=lambda item: item.get("rrf_score", 0.0), reverse=True)
 	if top_k is not None:

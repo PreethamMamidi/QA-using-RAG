@@ -5,6 +5,17 @@ import os
 from groq import Groq
 
 from generation.prompts import GROQ_ANSWER_INSTRUCTIONS
+from retrieval.citations import SourceCitation, citations_from_chunks
+
+
+def _citation_label(chunk: Dict[str, str]) -> str:
+    return SourceCitation(
+        document_id=str(chunk.get("document_id") or "unknown"),
+        filename=str(chunk.get("filename") or chunk.get("document_id") or "unknown"),
+        page=chunk.get("page"),
+        source_type=str(chunk.get("source_type") or "file"),
+        source_url=chunk.get("source_url"),
+    ).label()
 
 
 def build_context(chunks: List[Dict[str, str]], max_chars: int = 8000) -> str:
@@ -35,6 +46,7 @@ def build_context(chunks: List[Dict[str, str]], max_chars: int = 8000) -> str:
 
         doc_id = str(ch.get("document_id", "unknown"))
         chunk_id = str(ch.get("chunk_id", idx))
+        source_label = _citation_label(ch)
         score_val = ch.get("score")
         if isinstance(score_val, (int, float)):
             score = f"{score_val:.3f}"
@@ -43,7 +55,7 @@ def build_context(chunks: List[Dict[str, str]], max_chars: int = 8000) -> str:
         else:
             score = "n/a"
 
-        header = f"[SOURCE: {doc_id} | chunk_id: {chunk_id} | score: {score}]\n"
+        header = f"[SOURCE: {source_label} | document_id: {doc_id} | chunk_id: {chunk_id} | score: {score}]\n"
         entry = f"{header}{text}\n\n"
 
         if len(entry) > remaining:

@@ -29,7 +29,9 @@ class SQLiteMetadataRepository(MetadataRepository):
                     document_id TEXT PRIMARY KEY,
                     filename TEXT NOT NULL,
                     upload_time TEXT NOT NULL,
-                    total_chunks INTEGER DEFAULT 0
+                    total_chunks INTEGER DEFAULT 0,
+                    source_type TEXT DEFAULT 'file',
+                    source_url TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS chunks (
@@ -38,6 +40,7 @@ class SQLiteMetadataRepository(MetadataRepository):
                     page INTEGER,
                     chunk_index INTEGER,
                     text TEXT NOT NULL,
+                    section_title TEXT,
                     FOREIGN KEY (document_id) REFERENCES documents(document_id) ON DELETE CASCADE
                 );
 
@@ -48,6 +51,25 @@ class SQLiteMetadataRepository(MetadataRepository):
                     ON chunks(page);
                 """
             )
+            self._migrate_schema(connection)
+
+    def _migrate_schema(self, connection: sqlite3.Connection) -> None:
+        document_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(documents)").fetchall()
+        }
+        if "source_type" not in document_columns:
+            connection.execute(
+                "ALTER TABLE documents ADD COLUMN source_type TEXT DEFAULT 'file'"
+            )
+        if "source_url" not in document_columns:
+            connection.execute("ALTER TABLE documents ADD COLUMN source_url TEXT")
+
+        chunk_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(chunks)").fetchall()
+        }
+        if "section_title" not in chunk_columns:
+            connection.execute("ALTER TABLE chunks ADD COLUMN section_title TEXT")
 
     def insert_document(
         self,
@@ -55,6 +77,8 @@ class SQLiteMetadataRepository(MetadataRepository):
         filename: str,
         upload_time: str,
         total_chunks: int = 0,
+        source_type: str = "file",
+        source_url: str | None = None,
     ) -> None:
         with self._get_connection() as connection:
             connection.execute(
@@ -63,10 +87,12 @@ class SQLiteMetadataRepository(MetadataRepository):
                     document_id,
                     filename,
                     upload_time,
-                    total_chunks
-                ) VALUES (?, ?, ?, ?)
+                    total_chunks,
+                    source_type,
+                    source_url
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (document_id, filename, upload_time, total_chunks),
+                (document_id, filename, upload_time, total_chunks, source_type, source_url),
             )
 
     def insert_chunks(self, chunks: Sequence[Dict[str, Any]]) -> None:
@@ -80,6 +106,7 @@ class SQLiteMetadataRepository(MetadataRepository):
                 chunk.get("page"),
                 chunk.get("chunk_index"),
                 chunk["text"],
+                chunk.get("section_title"),
             )
             for chunk in chunks
         ]
@@ -92,8 +119,9 @@ class SQLiteMetadataRepository(MetadataRepository):
                     document_id,
                     page,
                     chunk_index,
-                    text
-                ) VALUES (?, ?, ?, ?, ?)
+                    text,
+                    section_title
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 payload,
             )
@@ -105,13 +133,15 @@ class SQLiteMetadataRepository(MetadataRepository):
             "filename": row["filename"],
             "upload_time": row["upload_time"],
             "total_chunks": row["total_chunks"],
+            "source_type": row["source_type"] if "source_type" in row.keys() else "file",
+            "source_url": row["source_url"] if "source_url" in row.keys() else None,
         }
 
     def get_document(self, document_id: str) -> Optional[Dict[str, Any]]:
         with self._get_connection() as connection:
             row = connection.execute(
                 """
-                SELECT document_id, filename, upload_time, total_chunks
+                SELECT document_id, filename, upload_time, total_chunks, source_type, source_url
                 FROM documents
                 WHERE document_id = ?
                 """,
@@ -123,7 +153,7 @@ class SQLiteMetadataRepository(MetadataRepository):
         with self._get_connection() as connection:
             rows = connection.execute(
                 """
-                SELECT document_id, filename, upload_time, total_chunks
+                SELECT document_id, filename, upload_time, total_chunks, source_type, source_url
                 FROM documents
                 ORDER BY upload_time DESC, document_id ASC
                 """
@@ -169,7 +199,10 @@ class SQLiteMetadataRepository(MetadataRepository):
                     documents.filename,
                     chunks.page,
                     chunks.chunk_index,
-                    chunks.text
+                    chunks.text,
+                    chunks.section_title,
+                    documents.source_type,
+                    documents.source_url
                 FROM chunks
                 JOIN documents ON documents.document_id = chunks.document_id
                 WHERE chunks.document_id IN ({placeholders})
@@ -193,7 +226,10 @@ class SQLiteMetadataRepository(MetadataRepository):
                     documents.filename,
                     chunks.page,
                     chunks.chunk_index,
-                    chunks.text
+                    chunks.text,
+                    chunks.section_title,
+                    documents.source_type,
+                    documents.source_url
                 FROM chunks
                 JOIN documents ON documents.document_id = chunks.document_id
                 ORDER BY

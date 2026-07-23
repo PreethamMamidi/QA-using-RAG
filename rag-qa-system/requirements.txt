@@ -2,19 +2,19 @@
 sentence-transformers
 faiss-cpu
 rank-bm25
-# Core
 torch
 transformers
-sentence-transformers
-sentence-transformers
-faiss-cpu
 numpy
 scikit-learn
 
 # Ingestion
+docling
+rapidocr-onnxruntime
+onnxruntime
 pymupdf
 nltk
-pypdf
+pytesseract
+pillow
 
 # App
 streamlit

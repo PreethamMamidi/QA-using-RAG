@@ -7,6 +7,7 @@ is available (run `import nltk; nltk.download("punkt")` once if needed).
 """
 from typing import Dict, List
 
+import re
 import nltk
 from nltk.tokenize import sent_tokenize
 
@@ -147,5 +148,72 @@ def chunk_text(
 			"text": text_chunk,
 		})
 
+	return out
+
+
+def _split_markdown_sections(text: str) -> List[tuple[str | None, str]]:
+	"""Split markdown into (heading, body) sections."""
+	if not text or not text.strip():
+		return []
+
+	sections: List[tuple[str | None, str]] = []
+	current_heading: str | None = None
+	current_lines: List[str] = []
+
+	def flush() -> None:
+		nonlocal current_heading, current_lines
+		body = "\n".join(current_lines).strip()
+		if body:
+			sections.append((current_heading, body))
+		current_lines = []
+
+	for line in text.splitlines():
+		heading_match = re.match(r"^(#{1,6})\s+(.+)$", line.strip())
+		if heading_match:
+			flush()
+			current_heading = heading_match.group(2).strip()
+			continue
+		current_lines.append(line)
+
+	flush()
+	if not sections:
+		return [(None, text.strip())]
+	return sections
+
+
+def get_chunk_params(source_type: str | None = None, filename: str | None = None) -> tuple[int, int]:
+	"""Return (chunk_size, overlap) tuned for the document source type."""
+	filename = (filename or "").lower()
+	source_type = (source_type or "file").lower()
+
+	if source_type == "url":
+		return 280, 80
+	if source_type == "image" or filename.endswith((".png", ".jpg", ".jpeg", ".webp", ".tiff", ".tif", ".bmp", ".gif")):
+		return 180, 60
+	if filename.endswith(".pdf"):
+		return 180, 60
+	if filename.endswith((".docx", ".md", ".markdown", ".html", ".htm")):
+		return 280, 80
+	return 280, 80
+
+
+def chunk_markdown(
+	text: str,
+	document_id: str,
+	chunk_size: int = 400,
+	overlap: int = 80,
+) -> List[Dict[str, str]]:
+	"""Chunk markdown by headings first, then sentence-aware overlap within sections."""
+	sections = _split_markdown_sections(text)
+	if not sections:
+		return []
+
+	out: List[Dict[str, str]] = []
+	for heading, body in sections:
+		section_chunks = chunk_text(body, document_id=document_id, chunk_size=chunk_size, overlap=overlap)
+		for chunk in section_chunks:
+			if heading:
+				chunk["section_title"] = heading
+			out.append(chunk)
 	return out
 

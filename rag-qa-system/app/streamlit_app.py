@@ -1,6 +1,7 @@
 import streamlit as st
 import sys
 import os
+import json
 import tempfile
 import shutil
 import datetime
@@ -40,19 +41,24 @@ def _split_source_document_id(source_document_id: str) -> tuple[str, int | None]
     return match.group(1), int(match.group(2))
 
 
-def _build_storage_schema(uploaded_files, docs):
+def _build_storage_schema(sources, docs):
     uploaded_at = datetime.date.today().isoformat()
     docs_by_filename = {}
     for item in docs:
-        source_name, page_number = _split_source_document_id(item["document_id"])
-        docs_by_filename.setdefault(source_name, []).append((page_number, item))
+        key = item.get("filename") or _split_source_document_id(item["document_id"])[0]
+        _, page_number = _split_source_document_id(item["document_id"])
+        if page_number is None:
+            page_number = item.get("page")
+        docs_by_filename.setdefault(key, []).append((page_number, item))
 
     used_ids = set()
     documents = []
     chunks = []
 
-    for uploaded_file in uploaded_files:
-        filename = uploaded_file.name
+    for source in sources:
+        filename = source["filename"]
+        source_type = source.get("source_type", "file")
+        source_url = source.get("source_url")
         base_id = _slugify_document_name(filename)
         document_id = base_id
         suffix = 2
@@ -72,20 +78,36 @@ def _build_storage_schema(uploaded_files, docs):
                 "filename": filename,
                 "uploaded_at": uploaded_at,
                 "total_pages": total_pages,
+                "source_type": source_type,
+                "source_url": source_url,
             }
         )
 
         if not source_pages:
             continue
 
+        chunk_size, overlap = get_chunk_params(source_type, filename)
+        use_markdown = source_type == "url" or filename.lower().endswith(
+            (".md", ".markdown", ".docx", ".html", ".htm")
+        )
+
         for page_number, source_doc in source_pages:
             page_label = page_number if page_number is not None else 1
-            page_chunks = chunk_text(
-                clean_text(source_doc["text"]),
-                document_id=document_id,
-                chunk_size=180 if filename.lower().endswith(".pdf") else 280,
-                overlap=60 if filename.lower().endswith(".pdf") else 80,
-            )
+            cleaned = clean_text(source_doc["text"])
+            if use_markdown:
+                page_chunks = chunk_markdown(
+                    cleaned,
+                    document_id=document_id,
+                    chunk_size=chunk_size,
+                    overlap=overlap,
+                )
+            else:
+                page_chunks = chunk_text(
+                    cleaned,
+                    document_id=document_id,
+                    chunk_size=chunk_size,
+                    overlap=overlap,
+                )
             for chunk_index, chunk in enumerate(page_chunks):
                 chunk["chunk_id"] = f"{document_id}_p{page_label}_c{chunk_index}"
                 chunk["document_id"] = document_id
@@ -125,10 +147,15 @@ def _render_knowledge_base_sidebar():
 
     for doc in repository.list_documents():
         st.sidebar.markdown(f"**{doc['filename']}**")
+        source_type = doc.get("source_type", "file")
+        source_url = doc.get("source_url")
+        type_label = f" · {source_type}" if source_type != "file" else ""
         st.sidebar.caption(
             f"{doc['upload_time']} · {doc['total_chunks']} chunk"
-            f"{'s' if doc['total_chunks'] != 1 else ''}"
+            f"{'s' if doc['total_chunks'] != 1 else ''}{type_label}"
         )
+        if source_url:
+            st.sidebar.caption(source_url)
 
 
 def _render_document_filter_sidebar():
@@ -253,6 +280,8 @@ def _sync_sqlite_metadata(document_records, chunks):
                 filename=document["filename"],
                 upload_time=document["uploaded_at"],
                 total_chunks=chunk_totals.get(document["document_id"], 0),
+                source_type=document.get("source_type", "file"),
+                source_url=document.get("source_url"),
             )
 
         repository.insert_chunks(
@@ -263,6 +292,7 @@ def _sync_sqlite_metadata(document_records, chunks):
                     "page": chunk.get("page"),
                     "chunk_index": _extract_chunk_index(chunk),
                     "text": chunk["text"],
+                    "section_title": chunk.get("section_title"),
                 }
                 for chunk in chunks
             ]
@@ -289,6 +319,46 @@ def _remove_tree_safely(path):
         return False
 
 
+def _run_full_ingestion(sources, docs, stats_label: str):
+    if not docs:
+        st.warning("No text could be extracted from the provided source(s).")
+        return
+
+    document_records, all_chunks = _build_storage_schema(sources, docs)
+    if not all_chunks:
+        st.warning("No chunks were created. The source may be empty or OCR failed.")
+        return
+
+    with st.status("Building search index...", expanded=True) as status:
+        st.write("Embedding chunks...")
+        embeddings = embed_texts([c["text"] for c in all_chunks])
+        index = build_index(embeddings)
+
+        st.session_state.chunks = all_chunks
+        st.session_state.index = index
+        _refresh_hybrid_retriever()
+
+        os.makedirs(STORAGE_DIR, exist_ok=True)
+        import faiss
+
+        faiss.write_index(index, os.path.join(STORAGE_DIR, "faiss.index"))
+
+        st.write("Saving metadata...")
+        _sync_sqlite_metadata(document_records, all_chunks)
+        st.session_state.documents, st.session_state.chunks = _load_metadata_from_sqlite()
+        _refresh_hybrid_retriever()
+        status.update(label="Ingestion complete", state="complete")
+
+    st.sidebar.success("Saved documents and index to storage/ ✅")
+    st.session_state.stats = {
+        "files_uploaded": len(sources),
+        "docs_loaded": len(docs),
+        "chunks_created": len(all_chunks),
+        "stats_label": stats_label,
+    }
+    st.success(f"Processed {len(all_chunks)} chunks from {stats_label}")
+
+
 def _refresh_hybrid_retriever():
     if st.session_state.index is None or not st.session_state.chunks:
         st.session_state.hybrid_retriever = None
@@ -299,17 +369,28 @@ def _refresh_hybrid_retriever():
         st.session_state.chunks,
     )
 
+from ingestion.docling_converter import IMAGE_EXTENSIONS, docling_available
 from ingestion.loader import load_documents
+from ingestion.web_loader import load_web_page, save_web_snapshot, validate_web_url
 from ingestion.cleaner import clean_text
-from ingestion.chunker import chunk_text
+from ingestion.chunker import chunk_text, chunk_markdown, get_chunk_params
 from embeddings.embedder import embed_texts
 from vector_store.faiss_index import build_index
 from retrieval.retriever import retrieve_chunks
 from retrieval.reranker import rerank_chunks
 from retrieval.hybrid_retrieval import HybridRetriever
 from retrieval.query_rewrite import rewrite_query_groq
+from retrieval.citations import citations_from_chunks, citations_report_payload, format_citations_markdown
 from generation.generator import stream_answer
 from generation.groq_generator import stream_answer_groq
+from chat.chat_state import init_chat_state, clear_chat_history
+from chat.chat_manager import add_assistant_message, add_user_message, ensure_chat_ready
+from chat.ui import (
+    render_chat_history,
+    render_conversation_sidebar,
+    render_empty_chat_placeholder,
+    stream_assistant_reply,
+)
 
 
 logging.basicConfig(level=logging.INFO)
@@ -317,14 +398,40 @@ logging.basicConfig(level=logging.INFO)
 st.set_page_config(page_title="RAG QA System", layout="wide")
 st.title("📄 Retrieval-Augmented Question Answering")
 
-# ---------------- Sidebar: Upload ----------------
-st.sidebar.header("Upload documents")
-uploaded_files = st.sidebar.file_uploader(
-    "Upload TXT or PDF files",
-    type=["txt", "pdf"],
-    accept_multiple_files=True
-)
-process = st.sidebar.button("✅ Process documents")
+ensure_chat_ready()
+
+if not docling_available():
+    st.sidebar.info(
+        "Docling OCR is not installed. PDF/TXT work with fallback; "
+        "install docling + rapidocr-onnxruntime for DOCX, images, scanned PDFs, and URLs."
+    )
+
+# ---------------- Sidebar: Conversation (independent of knowledge base) ----------------
+render_conversation_sidebar()
+st.sidebar.divider()
+
+# ---------------- Sidebar: Ingestion ----------------
+st.sidebar.header("Add to knowledge base")
+ingest_tab_upload, ingest_tab_url = st.sidebar.tabs(["Upload files", "Web page"])
+
+SUPPORTED_UPLOAD_TYPES = [
+    "txt", "pdf", "docx", "md", "markdown",
+    "png", "jpg", "jpeg", "webp", "tiff", "bmp", "gif",
+]
+
+with ingest_tab_upload:
+    uploaded_files = st.file_uploader(
+        "Upload documents",
+        type=SUPPORTED_UPLOAD_TYPES,
+        accept_multiple_files=True,
+    )
+    process_files = st.button("✅ Process documents", key="process_files")
+
+with ingest_tab_url:
+    web_url = st.text_input("Page URL", placeholder="https://example.com/docs/guide")
+    process_url = st.button("✅ Process URL", key="process_url")
+    st.caption("Static HTML pages work best. JavaScript-heavy sites may not ingest fully.")
+
 reset = st.sidebar.button("🔄 Reset system")
 st.sidebar.divider()
 _render_knowledge_base_sidebar()
@@ -379,11 +486,12 @@ show_retrieval_debug = st.sidebar.checkbox("Show retrieval debug info", value=Fa
 
 if "stats" in st.session_state and st.session_state.stats:
     st.sidebar.subheader("📊 Processing Summary")
-    st.sidebar.write(f"📁 Files uploaded: {st.session_state.stats['files_uploaded']}")
-    st.sidebar.write(f"📄 Pages/Docs loaded: {st.session_state.stats['docs_loaded']}")
+    st.sidebar.write(st.session_state.stats.get("stats_label", "Last ingestion"))
+    st.sidebar.write(f"📁 Sources processed: {st.session_state.stats['files_uploaded']}")
+    st.sidebar.write(f"📄 Pages/sections loaded: {st.session_state.stats['docs_loaded']}")
     st.sidebar.write(f"🧩 Chunks created: {st.session_state.stats['chunks_created']}")
 
-# ---------------- Session state ----------------
+# ---------------- Session state (knowledge base) ----------------
 if "chunks" not in st.session_state:
     st.session_state.chunks = None
 if "index" not in st.session_state:
@@ -392,6 +500,8 @@ if "documents" not in st.session_state:
     st.session_state.documents = None
 if "hybrid_retriever" not in st.session_state:
     st.session_state.hybrid_retriever = None
+
+init_chat_state()
 
 if (
     st.session_state.index is None
@@ -407,12 +517,13 @@ if (
     st.sidebar.success("Loaded saved index ✅")
 
 if reset:
-    # Clear in-memory state
+    # Clear in-memory knowledge-base state
     st.session_state.chunks = None
     st.session_state.index = None
     st.session_state.stats = None
     st.session_state.documents = None
     st.session_state.hybrid_retriever = None
+    clear_chat_history()
 
     # Delete saved files (if they exist)
     if os.path.exists(os.path.join(STORAGE_DIR, "faiss.index")):
@@ -439,12 +550,9 @@ if reset:
     st.stop()
 
 # ---------------- Process Uploaded Files ----------------
-if process and uploaded_files:
-    with st.spinner("Processing documents..."):
-        all_chunks = []
-
+if process_files and uploaded_files:
+    with st.spinner("Parsing documents with Docling..."):
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Save uploaded files temporarily
             for f in uploaded_files:
                 path = os.path.join(tmpdir, f.name)
                 with open(path, "wb") as out:
@@ -456,160 +564,214 @@ if process and uploaded_files:
                 with open(raw_path, "wb") as out:
                     out.write(f.getvalue())
 
-            # Load docs from temp folder
             docs = load_documents(tmpdir)
 
-        document_records, all_chunks = _build_storage_schema(uploaded_files, docs)
+        sources = [
+            {
+                "filename": f.name,
+                "source_type": "image" if os.path.splitext(f.name)[1].lower() in IMAGE_EXTENSIONS else "file",
+                "source_url": None,
+            }
+            for f in uploaded_files
+        ]
+        _run_full_ingestion(sources, docs, stats_label=f"{len(uploaded_files)} file(s)")
 
-        embeddings = embed_texts([c["text"] for c in all_chunks])
-        index = build_index(embeddings)
+elif process_url and web_url:
+    try:
+        validate_web_url(web_url)
+    except ValueError as exc:
+        st.error(str(exc))
+        st.stop()
 
-        st.session_state.chunks = all_chunks
-        st.session_state.index = index
-        _refresh_hybrid_retriever()
-        # ✅ Save index + chunks to disk
-        os.makedirs(STORAGE_DIR, exist_ok=True)
-
-# Save FAISS index
-        import faiss
-        faiss.write_index(index, os.path.join(STORAGE_DIR, "faiss.index"))
-
-        _sync_sqlite_metadata(document_records, all_chunks)
-        st.session_state.documents, st.session_state.chunks = _load_metadata_from_sqlite()
-        _refresh_hybrid_retriever()
-
-        st.sidebar.success("Saved documents and index to storage/ ✅")
-
-        st.session_state.stats = {
-            "files_uploaded": len(uploaded_files),
-            "docs_loaded": len(docs),        # pdf pages count here
-            "chunks_created": len(all_chunks)
-        }
-
-        st.success(f"Processed {len(all_chunks)} chunks")
-
-# ---------------- Query UI ----------------
-if st.session_state.index is not None:
-    query = st.text_input("Ask a question")
-
-    if query:
-        filtered_chunks, candidate_indices, scope_labels, filter_incomplete = _resolve_retrieval_scope(
-            filter_mode,
-            selected_document_ids,
-            st.session_state.chunks,
-        )
-        display_labels = scope_labels or active_filter_labels
-
-        rewritten_query = rewrite_query_groq(query, mode=rewrite_mode)
-        with st.sidebar.expander("Rewritten retrieval query", expanded=False):
-            st.write(rewritten_query or "(empty)")
-
-        retrieval_query = rewritten_query or query
-        retrieval_debug = None
-
-        if filter_incomplete:
-            st.warning("Select at least one document to apply a document filter.")
+    with st.spinner("Fetching and parsing web page..."):
+        try:
+            docs = load_web_page(web_url)
+        except Exception as exc:
+            st.error(f"Failed to ingest URL: {exc}")
             st.stop()
 
-        if display_labels:
-            st.info(f"Retrieval limited to: {', '.join(display_labels)}")
+        web_snapshot_dir = os.path.join(RAW_DOCS_DIR, "web")
+        save_web_snapshot(web_url, web_snapshot_dir)
 
-        retrieval_kwargs = {}
-        if filtered_chunks is not None:
-            retrieval_kwargs = {
-                "chunks": filtered_chunks,
-                "candidate_indices": candidate_indices,
+        filename = docs[0].get("filename") if docs else "web_page.html"
+        sources = [
+            {
+                "filename": filename,
+                "source_type": "url",
+                "source_url": web_url.strip(),
+            }
+        ]
+        _run_full_ingestion(sources, docs, stats_label="1 web page")
+
+
+def _retrieve_for_chat_query(query: str):
+    """Run the existing retrieval pipeline for a single user query.
+
+    Returns
+    -------
+    tuple
+        (retrieved_chunks, rewritten_query, retrieval_debug_or_None, error_message_or_None)
+    """
+    filtered_chunks, candidate_indices, scope_labels, filter_incomplete = _resolve_retrieval_scope(
+        filter_mode,
+        selected_document_ids,
+        st.session_state.chunks,
+    )
+    display_labels = scope_labels or active_filter_labels
+
+    if filter_incomplete:
+        return [], "", None, "Select at least one document to apply a document filter."
+
+    # Retrieval uses the current query only. recent_turns() is available for a
+    # future contextual rewriter without changing this call site.
+    rewritten_query = rewrite_query_groq(query, mode=rewrite_mode)
+    retrieval_query = rewritten_query or query
+    retrieval_debug = None
+
+    retrieval_kwargs = {}
+    if filtered_chunks is not None:
+        retrieval_kwargs = {
+            "chunks": filtered_chunks,
+            "candidate_indices": candidate_indices,
+        }
+
+    if enable_hybrid_retrieval:
+        if st.session_state.hybrid_retriever is None:
+            _refresh_hybrid_retriever()
+
+        if show_retrieval_debug:
+            initial, retrieval_debug = st.session_state.hybrid_retriever.retrieve(
+                retrieval_query,
+                top_k_dense=top_k_dense,
+                top_k_sparse=top_k_sparse,
+                top_k_fused=top_k_fused,
+                rrf_k=rrf_k,
+                debug=True,
+                return_debug=True,
+                **retrieval_kwargs,
+            )
+        else:
+            initial = st.session_state.hybrid_retriever.retrieve(
+                retrieval_query,
+                top_k_dense=top_k_dense,
+                top_k_sparse=top_k_sparse,
+                top_k_fused=top_k_fused,
+                rrf_k=rrf_k,
+                debug=False,
+                return_debug=False,
+                **retrieval_kwargs,
+            )
+    else:
+        initial = retrieve_chunks(
+            retrieval_query,
+            st.session_state.index,
+            st.session_state.chunks,
+            top_k=top_k_dense,
+            candidate_indices=candidate_indices if filtered_chunks is not None else None,
+        )
+        if show_retrieval_debug:
+            retrieval_debug = {
+                "dense_results": initial,
+                "sparse_results": [],
+                "fused_results": initial,
             }
 
-        with st.spinner("Retrieving relevant context..."):
-            if enable_hybrid_retrieval:
-                if st.session_state.hybrid_retriever is None:
-                    _refresh_hybrid_retriever()
+    retrieved = rerank_chunks(query, initial, top_k=5) if use_reranker else initial[:8]
+    if show_retrieval_debug and retrieval_debug is not None:
+        retrieval_debug["reranked_results"] = retrieved
+        if display_labels:
+            retrieval_debug["active_filters"] = display_labels
 
-                if show_retrieval_debug:
-                    initial, retrieval_debug = st.session_state.hybrid_retriever.retrieve(
-                        retrieval_query,
-                        top_k_dense=top_k_dense,
-                        top_k_sparse=top_k_sparse,
-                        top_k_fused=top_k_fused,
-                        rrf_k=rrf_k,
-                        debug=True,
-                        return_debug=True,
-                        **retrieval_kwargs,
+    return retrieved, rewritten_query or query, retrieval_debug, None
+
+
+# ---------------- Chat UI ----------------
+if st.session_state.index is not None:
+    history = st.session_state.get("chat_history") or []
+    if not history:
+        render_empty_chat_placeholder()
+    else:
+        render_chat_history()
+
+    prompt = st.chat_input("Ask a question about your documents...")
+    if prompt:
+        add_user_message(prompt)
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Retrieving relevant context..."):
+                retrieved, rewritten_query, retrieval_debug, retrieval_error = _retrieve_for_chat_query(prompt)
+
+            if retrieval_error:
+                st.warning(retrieval_error)
+                add_assistant_message(retrieval_error)
+            elif generator_choice == "Groq (LLM API)" and not GROQ_API_KEY:
+                msg = "GROQ_API_KEY is missing. Configure it to use Groq, or switch to Local (FLAN-T5)."
+                st.error(msg)
+                add_assistant_message(msg)
+            else:
+                if rewritten_query and rewritten_query != prompt:
+                    st.caption(f"Retrieval query: {rewritten_query}")
+
+                if generator_choice == "Groq (LLM API)":
+                    answer_text = stream_assistant_reply(
+                        stream_answer_groq(prompt, retrieved, model=groq_model)
                     )
                 else:
-                    initial = st.session_state.hybrid_retriever.retrieve(
-                        retrieval_query,
-                        top_k_dense=top_k_dense,
-                        top_k_sparse=top_k_sparse,
-                        top_k_fused=top_k_fused,
-                        rrf_k=rrf_k,
-                        debug=False,
-                        return_debug=False,
-                        **retrieval_kwargs,
-                    )
-            else:
-                initial = retrieve_chunks(
-                    retrieval_query,
-                    st.session_state.index,
-                    st.session_state.chunks,
-                    top_k=top_k_dense,
-                    candidate_indices=candidate_indices if filtered_chunks is not None else None,
+                    answer_text = stream_assistant_reply(stream_answer(prompt, retrieved))
+
+                source_citations = citations_from_chunks(retrieved)
+                sources_markdown = format_citations_markdown(source_citations) if source_citations else ""
+                if sources_markdown:
+                    with st.expander("Sources", expanded=False):
+                        st.markdown(sources_markdown)
+
+                report_payload = citations_report_payload(
+                    retrieved,
+                    question=prompt,
+                    answer=str(answer_text or ""),
                 )
-                if show_retrieval_debug:
-                    retrieval_debug = {
-                        "dense_results": initial,
-                        "sparse_results": [],
-                        "fused_results": initial,
-                    }
+                st.download_button(
+                    label="Download citation report (JSON)",
+                    data=json.dumps(report_payload, indent=2),
+                    file_name="citation_report.json",
+                    mime="application/json",
+                    key=f"citation_download_live_{len(st.session_state.chat_history)}",
+                )
 
-            retrieved = rerank_chunks(query, initial, top_k=5) if use_reranker else initial[:8]
+                if show_retrieval_debug and retrieval_debug is not None:
+                    with st.expander("Retrieval debug", expanded=False):
+                        st.markdown("**Dense retrieval**")
+                        st.json(_preview_rankings(retrieval_debug.get("dense_results", [])))
+                        st.markdown("**Sparse retrieval**")
+                        st.json(_preview_rankings(retrieval_debug.get("sparse_results", [])))
+                        st.markdown("**Fused retrieval**")
+                        st.json(_preview_rankings(retrieval_debug.get("fused_results", [])))
+                        st.markdown("**Reranked results**")
+                        st.json(_preview_rankings(retrieval_debug.get("reranked_results", [])))
 
-        st.caption(f"Original query: {query}")
-        st.caption(f"Rewritten query: {rewritten_query or query}")
+                with st.expander("🔍 View Retrieved Context (Top Matches)", expanded=False):
+                    for i, r in enumerate(retrieved, start=1):
+                        st.markdown(f"### Chunk {i}")
+                        st.markdown(f"**Document:** `{r.get('filename', r['document_id'])}`")
+                        st.markdown(f"**Document ID:** `{r['document_id']}`")
+                        if r.get("page") is not None:
+                            st.markdown(f"**Page:** `{r['page']}`")
+                        st.markdown(f"**Score:** `{r['score']:.3f}`")
+                        st.text_area(
+                            label=f"Chunk Text {i}",
+                            value=r["text"],
+                            height=150,
+                            key=f"chunk_text_live_{len(st.session_state.chat_history)}_{i}",
+                        )
 
-        if show_retrieval_debug and retrieval_debug is not None:
-            retrieval_debug["reranked_results"] = retrieved
-            with st.sidebar.expander("Retrieval debug info", expanded=False):
-                st.markdown("**Dense retrieval**")
-                st.json(_preview_rankings(retrieval_debug.get("dense_results", [])))
-                st.markdown("**Sparse retrieval**")
-                st.json(_preview_rankings(retrieval_debug.get("sparse_results", [])))
-                st.markdown("**Fused retrieval**")
-                st.json(_preview_rankings(retrieval_debug.get("fused_results", [])))
-                st.markdown("**Reranked results**")
-                st.json(_preview_rankings(retrieval_debug.get("reranked_results", [])))
-
-        st.subheader("Answer")
-        if generator_choice == "Groq (LLM API)":
-            if not GROQ_API_KEY:
-                st.stop()
-            st.write_stream(stream_answer_groq(query, retrieved, model=groq_model))
-        else:
-            st.write_stream(stream_answer(query, retrieved))
-
-        st.subheader("Sources")
-        for r in retrieved:
-            source_name = r.get("filename") or r.get("document_id")
-            page_number = r.get("page")
-            if page_number is not None:
-                source_name = f"{source_name} (page {page_number})"
-            st.markdown(
-                f"- **{source_name}** (score={r['score']:.3f})"
-            )
-
-        with st.expander("🔍 View Retrieved Context (Top Matches)"):
-            for i, r in enumerate(retrieved, start=1):
-                st.markdown(f"### Chunk {i}")
-                st.markdown(f"**Document:** `{r.get('filename', r['document_id'])}`")
-                st.markdown(f"**Document ID:** `{r['document_id']}`")
-                if r.get("page") is not None:
-                    st.markdown(f"**Page:** `{r['page']}`")
-                st.markdown(f"**Score:** `{r['score']:.3f}`")
-                st.text_area(
-                label=f"Chunk Text {i}",
-                value=r["text"],
-                height=150
-          )
+                add_assistant_message(
+                    str(answer_text or ""),
+                    sources_markdown=sources_markdown,
+                    citation_report=report_payload,
+                    retrieval_debug=retrieval_debug if show_retrieval_debug else None,
+                    rewritten_query=rewritten_query if rewritten_query != prompt else "",
+                )
 else:
     st.info("Upload documents and click **Process documents** to begin.")

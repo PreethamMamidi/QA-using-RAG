@@ -98,6 +98,8 @@ def retrieve_chunks(
 		for idx, score in scored_indices[:top_k]:
 			item = dict(chunks[idx])
 			item["score"] = score
+			item["dense_score"] = score
+			item["retrieval"] = "dense"
 			results.append(item)
 		return results
 
@@ -113,6 +115,8 @@ def retrieve_chunks(
 			continue
 		item = dict(chunks[idx])
 		item["score"] = float(score)
+		item["dense_score"] = float(score)
+		item["retrieval"] = "dense"
 		results.append(item)
 
 	# Ensure descending by score (FAISS typically returns sorted, but be explicit)

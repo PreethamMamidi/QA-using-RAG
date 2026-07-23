@@ -3,6 +3,8 @@ from typing import Dict, List, Optional, Tuple
 
 from sentence_transformers import CrossEncoder
 
+from retrieval.citations import preserve_chunk_metadata
+
 
 _MODEL_CACHE: Optional[CrossEncoder] = None
 _DEFAULT_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
@@ -63,8 +65,9 @@ def rerank_chunks(
 
     rescored: List[Tuple[float, Dict[str, str]]] = []
     for score, ch in zip(scores.tolist(), filtered):
-        item = dict(ch)
+        item = preserve_chunk_metadata(ch)
         item["rerank_score"] = float(score)
+        item["score"] = float(score)
         item["retrieval"] = "reranked"
         rescored.append((item["rerank_score"], item))
 

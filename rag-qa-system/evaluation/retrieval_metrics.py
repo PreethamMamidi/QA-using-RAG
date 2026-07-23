@@ -1,25 +1,4 @@
-from typing import List, Set
+"""Backward-compatible re-exports for retrieval metrics."""
+from evaluation.metrics import hit_rate_at_k, recall_at_k
 
-
-def precision_at_k(retrieved_ids: List[str], relevant_ids: Set[str], k: int) -> float:
-    """
-    Precision@k = (# relevant retrieved in top-k) / k
-    """
-    if k <= 0:
-        return 0.0
-    top_k = retrieved_ids[:k]
-    if not top_k:
-        return 0.0
-    hits = sum(1 for rid in top_k if rid in relevant_ids)
-    return hits / k
-
-
-def recall_at_k(retrieved_ids: List[str], relevant_ids: Set[str], k: int) -> float:
-    """
-    Recall@k = (# relevant retrieved in top-k) / (# relevant total)
-    """
-    if not relevant_ids:
-        return 0.0
-    top_k = retrieved_ids[:k]
-    hits = sum(1 for rid in top_k if rid in relevant_ids)
-    return hits / len(relevant_ids)
+__all__ = ["recall_at_k", "hit_rate_at_k"]

@@ -144,27 +144,67 @@ pip install -r requirements.txt
 3. Download NLTK tokenizer models (one-time):
 
 ```bash
-python -c "import nltk; nltk.download('punkt')"
+python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
 ```
 
-4. Start the Streamlit app:
+4. Install Docling + OCR backends for DOCX, Markdown, images, scanned PDFs, and web URLs:
+
+```bash
+pip install docling rapidocr-onnxruntime onnxruntime
+```
+
+5. Start the Streamlit app:
 
 ```bash
 streamlit run app/streamlit_app.py
 ```
 
-5. Alternatively, run the batch pipeline to process documents in `data/raw_docs/`:
+6. Alternatively, run the batch pipeline to process documents in `data/raw_docs/`:
 
 ```bash
 python run_pipeline.py
 ```
 
+## Supported document formats
+
+The ingestion pipeline uses **Docling + RapidOCR** when available, with a **PyMuPDF + Tesseract** hybrid fallback for PDFs/images.
+
+| Format | Support | Notes |
+|--------|---------|-------|
+| `.txt` | Yes | Fast UTF-8 loader |
+| `.pdf` | Yes | Docling first; fallback hybrid: text layer + Tesseract for scans/images |
+| `.docx` | Yes | Requires Docling |
+| `.md` | Yes | Requires Docling |
+| Images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.tiff`, `.bmp`, `.gif`) | Yes | Docling, then Tesseract fallback |
+| Web page (single URL) | Yes | Paste URL in Streamlit **Web page** tab |
+
+**PDF hybrid rules (fallback path):**
+1. Extract embedded text with PyMuPDF.
+2. If text is sparse (`< 50` chars) → full-page Tesseract OCR.
+3. If text is rich **and** the page has images → keep text **and** OCR image regions.
+4. If text is rich and no images → text only.
+
+Install ingestion extras:
+
+```bash
+pip install docling rapidocr-onnxruntime onnxruntime pytesseract pillow
+```
+
+Also install the **Tesseract** system binary (Windows: [UB Mannheim installer](https://github.com/UB-Mannheim/tesseract/wiki); Linux: `sudo apt install tesseract-ocr`).
+
+First Docling/OCR run downloads model weights and may take a few minutes.
+
+**Notes:**
+- Static HTML pages ingest best; JavaScript-rendered sites may not work in v1.
+- Legacy `.doc` (old Word binary) is not supported; convert to `.docx` first.
+- If Docling fails (e.g. Windows symlink/HF cache issues), PDFs still ingest via the hybrid fallback.
+
 ## Typical workflow
 
-1. Add documents (PDF or TXT) to `data/raw_docs/`.
-2. Run the ingestion pipeline (`run_pipeline.py`) or use the Streamlit UI to process documents.
-3. The pipeline will produce chunk files in `data/processed_chunks/`, compute embeddings, and build a FAISS index in `storage/`.
-4. Use the Streamlit UI or the retrieval/generation modules to ask questions; retrieved chunks are used as context for answer generation.
+1. Add documents via the Streamlit **Upload files** tab or **Web page** tab, or place files in `data/raw_docs/` for `run_pipeline.py`.
+2. Run ingestion (Streamlit **Process** button or `python run_pipeline.py`).
+3. Embeddings and chunks are saved to `storage/faiss.index` and `storage/metadata.db`.
+4. Ask questions in the Streamlit UI; retrieved chunks ground the generated answer.
 
 ## Key configuration points
 
@@ -174,8 +214,25 @@ python run_pipeline.py
 
 ## Evaluation
 
-- Retrieval metrics are implemented in `evaluation/retrieval_metrics.py`.
-- QA metrics are available in `evaluation/qa_metrics.py` for measuring answer quality against labeled data.
+Retrieval quality can be measured with the evaluation framework under `evaluation/`:
+
+```bash
+python evaluation/run_eval.py --dataset evaluation/gold.json
+```
+
+Or open the **Evaluation Dashboard** page in Streamlit (sidebar navigation).
+
+**Dataset format** (`evaluation/sample_dataset.json`):
+
+```json
+{
+  "question": "What is TCP congestion control?",
+  "relevant_document_ids": ["doc_123"],
+  "relevant_chunk_ids": ["chunk_87"]
+}
+```
+
+Metrics: Recall@K, HitRate@K, MRR, and per-stage retrieval latency (BM25, FAISS, fusion, reranker).
 
 ## Development notes
 

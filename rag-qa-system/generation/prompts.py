@@ -15,7 +15,8 @@ ANSWER_INSTRUCTIONS = (
 
 GROQ_ANSWER_INSTRUCTIONS = (
 	f"{ANSWER_INSTRUCTIONS}\n"
-	"Include citations in the answer like '(Source: filename_page_N)' when possible.\n"
-	"Cite the best 1-2 sources max.\n"
+	"When citing sources in the answer, use the exact source labels from the context headers "
+	"(for example: 'Computer Networks.pdf (Page 12)').\n"
+	"Cite the best 1-3 distinct sources max.\n"
 	"Do not repeat the question."
 )
