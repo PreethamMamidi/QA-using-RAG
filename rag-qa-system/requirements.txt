@@ -19,6 +19,17 @@ pillow
 # App
 streamlit
 
+# API
+fastapi
+uvicorn[standard]
+python-multipart
+sse-starlette
+pydantic-settings
+httpx
+
+# Test
+pytest
+
 # Utilities
 tqdm
 python-dotenv

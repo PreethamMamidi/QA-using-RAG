@@ -153,13 +153,30 @@ python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
 pip install docling rapidocr-onnxruntime onnxruntime
 ```
 
-5. Start the Streamlit app:
+5. Start the **FastAPI** backend (primary API; use one worker — FAISS and models stay in process memory):
+
+```bash
+# From the rag-qa-system directory
+uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+OpenAPI docs: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+Optional env (`.env` or shell): `GROQ_API_KEY`, `API_KEY` (require `X-API-Key` header), `CORS_ORIGINS`, `DEFAULT_GENERATOR`.
+
+Smoke tests (no heavy ingest):
+
+```bash
+pytest tests/api/test_api_smoke.py -q
+```
+
+6. Or start the temporary Streamlit demo UI:
 
 ```bash
 streamlit run app/streamlit_app.py
 ```
 
-6. Alternatively, run the batch pipeline to process documents in `data/raw_docs/`:
+7. Alternatively, run the batch pipeline to process documents in `data/raw_docs/`:
 
 ```bash
 python run_pipeline.py
@@ -201,10 +218,15 @@ First Docling/OCR run downloads model weights and may take a few minutes.
 
 ## Typical workflow
 
-1. Add documents via the Streamlit **Upload files** tab or **Web page** tab, or place files in `data/raw_docs/` for `run_pipeline.py`.
-2. Run ingestion (Streamlit **Process** button or `python run_pipeline.py`).
-3. Embeddings and chunks are saved to `storage/faiss.index` and `storage/metadata.db`.
-4. Ask questions in the Streamlit UI; retrieved chunks ground the generated answer.
+**API (recommended):**
+1. Start `uvicorn api.main:app --reload` from `rag-qa-system`.
+2. `POST /documents/ingest/files` or `POST /documents/ingest/url` (V1 full KB rebuild).
+3. `POST /chat/sessions` then `POST /chat/sessions/{id}/messages` or `.../messages:stream` (SSE).
+4. Optional: `POST /evaluation/run` with `{"dataset":"gold.json"}`.
+
+**Streamlit (temporary demo):**
+1. Add documents via **Upload files** / **Web page**, or use `data/raw_docs/` with `run_pipeline.py`.
+2. Process in the UI; ask questions in chat. Same storage: `storage/faiss.index` + `storage/metadata.db`.
 
 ## Key configuration points
 
